@@ -1,0 +1,27 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+.coverage
+htmlcov/
+
+# Data (trop lourde pour Git)
+data/raw/
+data/parsed/
+*.pdf
+
+# Modèles
+models/
+*.bin
+*.safetensors
+*.pt
+
+# Secrets
+.env
+*.key
+
+# IDE
+.vscode/settings.json
+.idea/copy
