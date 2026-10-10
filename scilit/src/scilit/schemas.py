@@ -395,7 +395,7 @@ class RankedResult(BaseModel):
     chunk_text: str
     bm25_rank: int | None = None
     dense_rank: int | None = None
-    rrf_score: float
+    rrf_score: float | None = None
     reranker_score: float | None = None     # cross-encoder (Silver)
     final_rank: int = Field(ge=1)
     is_relevant: bool | None = None         # None = non annoté
