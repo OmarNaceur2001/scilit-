@@ -272,25 +272,38 @@ def generate(
             )
 
     # ── 4b. Dédupliquer (artefacts de chunks overlap) ─────────────────────
-    # Filtre 1 : phrase commençant par minuscule = fragment de chunk
-    # Filtre 2 : similitude préfixe (60 chars) avec une phrase déjà retenue
-    seen_prefixes: set[str] = set()
+    # Filtre 1 : commence par minuscule = fragment de chunk
+    # Filtre 2 : contenu (à partir du 2e mot) déjà présent dans une phrase
+    #            retenue → attrape "Training, the 7B..." ⊂ "Using...training,
+    #            the 7B..." et "Itions, RAG..." ⊂ "...conditions, RAG..."
+    def _norm(t: str) -> str:
+        return " ".join(t.lower().split())
+
     clean_sentences: list[VerifiedSentence] = []
+    added_norms: list[str] = []
+
     for sent in sentences:
-        # Garder intro et conclusion sans filtre
-        if not sent.verification_statuses:
+        if not sent.verification_statuses:          # intro / conclusion
             clean_sentences.append(sent)
             continue
-        t = sent.text.strip()
-        # Rejeter les fragments (commencent par minuscule ou chiffre isolé)
-        if t and t[0].islower():
+        t     = sent.text.strip()
+        words = t.split()
+        if not words:
             continue
-        # Rejeter les quasi-doublons (même préfixe 60 chars)
-        prefix = t[:60].lower()
-        if prefix in seen_prefixes:
+
+        # Filtre 1
+        if words[0][0].islower():
             continue
-        seen_prefixes.add(prefix)
+
+        # Filtre 2 — compare le corps (sans le 1er mot) à tous les textes déjà retenus
+        t_norm      = _norm(t)
+        after_first = _norm(" ".join(words[1:])) if len(words) > 1 else t_norm
+        if any(after_first in prev or t_norm in prev for prev in added_norms):
+            continue
+
         clean_sentences.append(sent)
+        added_norms.append(t_norm)
+
     sentences = clean_sentences
 
     # ── 5. Conclusion ────────────────────────────────────────────────────────
