@@ -21,6 +21,7 @@ dependencies = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.29",
     "tqdm>=4.66",
+    "rapidfuzz>=3.6",
     "python-dotenv>=1.0",
 ]
 

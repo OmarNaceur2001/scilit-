@@ -1,0 +1,639 @@
+{
+  "systems": {
+    "bm25": {
+      "mean_original_recall@10": 0.3013330674562804,
+      "mean_reformulation_recall@10": 0.17757185970859185,
+      "mean_top10_jaccard": 0.21557343585207364,
+      "per_query": [
+        {
+          "qid": "q01",
+          "original_recall@10": 0.23684210526315788,
+          "reformulation_mean_recall@10": 0.17105263157894735,
+          "top10_jaccard": 0.3025210084033613
+        },
+        {
+          "qid": "q02",
+          "original_recall@10": 0.24390243902439024,
+          "reformulation_mean_recall@10": 0.08536585365853658,
+          "top10_jaccard": 0.1437908496732026
+        },
+        {
+          "qid": "q03",
+          "original_recall@10": 0.3333333333333333,
+          "reformulation_mean_recall@10": 0.18333333333333335,
+          "top10_jaccard": 0.3025210084033613
+        },
+        {
+          "qid": "q04",
+          "original_recall@10": 0.2564102564102564,
+          "reformulation_mean_recall@10": 0.11538461538461538,
+          "top10_jaccard": 0.21323529411764708
+        },
+        {
+          "qid": "q05",
+          "original_recall@10": 0.3225806451612903,
+          "reformulation_mean_recall@10": 0.27419354838709675,
+          "top10_jaccard": 0.4358974358974359
+        },
+        {
+          "qid": "q06",
+          "original_recall@10": 0.36,
+          "reformulation_mean_recall@10": 0.24,
+          "top10_jaccard": 0.25
+        },
+        {
+          "qid": "q07",
+          "original_recall@10": 0.3333333333333333,
+          "reformulation_mean_recall@10": 0.21666666666666667,
+          "top10_jaccard": 0.29166666666666663
+        },
+        {
+          "qid": "q08",
+          "original_recall@10": 0.36,
+          "reformulation_mean_recall@10": 0.18,
+          "top10_jaccard": 0.17647058823529413
+        },
+        {
+          "qid": "q09",
+          "original_recall@10": 0.2631578947368421,
+          "reformulation_mean_recall@10": 0.10526315789473684,
+          "top10_jaccard": 0.1513157894736842
+        },
+        {
+          "qid": "q10",
+          "original_recall@10": 0.2564102564102564,
+          "reformulation_mean_recall@10": 0.15384615384615385,
+          "top10_jaccard": 0.08187134502923976
+        },
+        {
+          "qid": "q11",
+          "original_recall@10": 0.3125,
+          "reformulation_mean_recall@10": 0.171875,
+          "top10_jaccard": 0.25
+        },
+        {
+          "qid": "q12",
+          "original_recall@10": 0.3448275862068966,
+          "reformulation_mean_recall@10": 0.2413793103448276,
+          "top10_jaccard": 0.2698412698412698
+        },
+        {
+          "qid": "q13",
+          "original_recall@10": 0.23076923076923078,
+          "reformulation_mean_recall@10": 0.10256410256410256,
+          "top10_jaccard": 0.02631578947368421
+        },
+        {
+          "qid": "q14",
+          "original_recall@10": 0.29411764705882354,
+          "reformulation_mean_recall@10": 0.11764705882352941,
+          "top10_jaccard": 0.1437908496732026
+        },
+        {
+          "qid": "q15",
+          "original_recall@10": 0.36,
+          "reformulation_mean_recall@10": 0.24000000000000002,
+          "top10_jaccard": 0.25
+        },
+        {
+          "qid": "q16",
+          "original_recall@10": 0.25,
+          "reformulation_mean_recall@10": 0.125,
+          "top10_jaccard": 0.11455108359133127
+        },
+        {
+          "qid": "q17",
+          "original_recall@10": 0.38461538461538464,
+          "reformulation_mean_recall@10": 0.28846153846153844,
+          "top10_jaccard": 0.3333333333333333
+        },
+        {
+          "qid": "q18",
+          "original_recall@10": 0.3333333333333333,
+          "reformulation_mean_recall@10": 0.29166666666666663,
+          "top10_jaccard": 0.25
+        },
+        {
+          "qid": "q19",
+          "original_recall@10": 0.2564102564102564,
+          "reformulation_mean_recall@10": 0.11538461538461538,
+          "top10_jaccard": 0.1437908496732026
+        },
+        {
+          "qid": "q20",
+          "original_recall@10": 0.29411764705882354,
+          "reformulation_mean_recall@10": 0.1323529411764706,
+          "top10_jaccard": 0.18055555555555555
+        }
+      ]
+    },
+    "dense": {
+      "mean_original_recall@10": 0.302580427938935,
+      "mean_reformulation_recall@10": 0.19819494909916135,
+      "mean_top10_jaccard": 0.30955545572418636,
+      "per_query": [
+        {
+          "qid": "q01",
+          "original_recall@10": 0.23684210526315788,
+          "reformulation_mean_recall@10": 0.06578947368421052,
+          "top10_jaccard": 0.125
+        },
+        {
+          "qid": "q02",
+          "original_recall@10": 0.24390243902439024,
+          "reformulation_mean_recall@10": 0.0975609756097561,
+          "top10_jaccard": 0.11455108359133127
+        },
+        {
+          "qid": "q03",
+          "original_recall@10": 0.3333333333333333,
+          "reformulation_mean_recall@10": 0.26666666666666666,
+          "top10_jaccard": 0.3942307692307692
+        },
+        {
+          "qid": "q04",
+          "original_recall@10": 0.20512820512820512,
+          "reformulation_mean_recall@10": 0.10256410256410256,
+          "top10_jaccard": 0.2222222222222222
+        },
+        {
+          "qid": "q05",
+          "original_recall@10": 0.3225806451612903,
+          "reformulation_mean_recall@10": 0.25806451612903225,
+          "top10_jaccard": 0.29166666666666663
+        },
+        {
+          "qid": "q06",
+          "original_recall@10": 0.36,
+          "reformulation_mean_recall@10": 0.32,
+          "top10_jaccard": 0.3392857142857143
+        },
+        {
+          "qid": "q07",
+          "original_recall@10": 0.3333333333333333,
+          "reformulation_mean_recall@10": 0.26666666666666666,
+          "top10_jaccard": 0.4973262032085562
+        },
+        {
+          "qid": "q08",
+          "original_recall@10": 0.4,
+          "reformulation_mean_recall@10": 0.2,
+          "top10_jaccard": 0.3025210084033613
+        },
+        {
+          "qid": "q09",
+          "original_recall@10": 0.2631578947368421,
+          "reformulation_mean_recall@10": 0.09210526315789473,
+          "top10_jaccard": 0.08187134502923976
+        },
+        {
+          "qid": "q10",
+          "original_recall@10": 0.2564102564102564,
+          "reformulation_mean_recall@10": 0.20512820512820512,
+          "top10_jaccard": 0.3025210084033613
+        },
+        {
+          "qid": "q11",
+          "original_recall@10": 0.3125,
+          "reformulation_mean_recall@10": 0.171875,
+          "top10_jaccard": 0.2698412698412698
+        },
+        {
+          "qid": "q12",
+          "original_recall@10": 0.3448275862068966,
+          "reformulation_mean_recall@10": 0.3275862068965517,
+          "top10_jaccard": 0.5384615384615384
+        },
+        {
+          "qid": "q13",
+          "original_recall@10": 0.2564102564102564,
+          "reformulation_mean_recall@10": 0.1282051282051282,
+          "top10_jaccard": 0.18055555555555555
+        },
+        {
+          "qid": "q14",
+          "original_recall@10": 0.2647058823529412,
+          "reformulation_mean_recall@10": 0.1764705882352941,
+          "top10_jaccard": 0.3574660633484163
+        },
+        {
+          "qid": "q15",
+          "original_recall@10": 0.4,
+          "reformulation_mean_recall@10": 0.28,
+          "top10_jaccard": 0.3574660633484163
+        },
+        {
+          "qid": "q16",
+          "original_recall@10": 0.25,
+          "reformulation_mean_recall@10": 0.09722222222222222,
+          "top10_jaccard": 0.21428571428571427
+        },
+        {
+          "qid": "q17",
+          "original_recall@10": 0.38461538461538464,
+          "reformulation_mean_recall@10": 0.34615384615384615,
+          "top10_jaccard": 0.48351648351648346
+        },
+        {
+          "qid": "q18",
+          "original_recall@10": 0.3333333333333333,
+          "reformulation_mean_recall@10": 0.25,
+          "top10_jaccard": 0.48351648351648346
+        },
+        {
+          "qid": "q19",
+          "original_recall@10": 0.2564102564102564,
+          "reformulation_mean_recall@10": 0.17948717948717946,
+          "top10_jaccard": 0.4583333333333333
+        },
+        {
+          "qid": "q20",
+          "original_recall@10": 0.29411764705882354,
+          "reformulation_mean_recall@10": 0.1323529411764706,
+          "top10_jaccard": 0.17647058823529413
+        }
+      ]
+    },
+    "rrf": {
+      "mean_original_recall@10": 0.29376864573755623,
+      "mean_reformulation_recall@10": 0.20532805822204808,
+      "mean_top10_jaccard": 0.30001212023270846,
+      "per_query": [
+        {
+          "qid": "q01",
+          "original_recall@10": 0.23684210526315788,
+          "reformulation_mean_recall@10": 0.15789473684210525,
+          "top10_jaccard": 0.29166666666666663
+        },
+        {
+          "qid": "q02",
+          "original_recall@10": 0.21951219512195122,
+          "reformulation_mean_recall@10": 0.07317073170731708,
+          "top10_jaccard": 0.1437908496732026
+        },
+        {
+          "qid": "q03",
+          "original_recall@10": 0.3333333333333333,
+          "reformulation_mean_recall@10": 0.25,
+          "top10_jaccard": 0.4583333333333333
+        },
+        {
+          "qid": "q04",
+          "original_recall@10": 0.23076923076923078,
+          "reformulation_mean_recall@10": 0.14102564102564102,
+          "top10_jaccard": 0.29166666666666663
+        },
+        {
+          "qid": "q05",
+          "original_recall@10": 0.2903225806451613,
+          "reformulation_mean_recall@10": 0.2903225806451613,
+          "top10_jaccard": 0.5384615384615384
+        },
+        {
+          "qid": "q06",
+          "original_recall@10": 0.36,
+          "reformulation_mean_recall@10": 0.30000000000000004,
+          "top10_jaccard": 0.29166666666666663
+        },
+        {
+          "qid": "q07",
+          "original_recall@10": 0.3,
+          "reformulation_mean_recall@10": 0.26666666666666666,
+          "top10_jaccard": 0.3942307692307692
+        },
+        {
+          "qid": "q08",
+          "original_recall@10": 0.4,
+          "reformulation_mean_recall@10": 0.2,
+          "top10_jaccard": 0.2549019607843137
+        },
+        {
+          "qid": "q09",
+          "original_recall@10": 0.21052631578947367,
+          "reformulation_mean_recall@10": 0.10526315789473684,
+          "top10_jaccard": 0.18055555555555555
+        },
+        {
+          "qid": "q10",
+          "original_recall@10": 0.2564102564102564,
+          "reformulation_mean_recall@10": 0.1794871794871795,
+          "top10_jaccard": 0.3025210084033613
+        },
+        {
+          "qid": "q11",
+          "original_recall@10": 0.3125,
+          "reformulation_mean_recall@10": 0.21875,
+          "top10_jaccard": 0.3942307692307692
+        },
+        {
+          "qid": "q12",
+          "original_recall@10": 0.3448275862068966,
+          "reformulation_mean_recall@10": 0.27586206896551724,
+          "top10_jaccard": 0.4583333333333333
+        },
+        {
+          "qid": "q13",
+          "original_recall@10": 0.1794871794871795,
+          "reformulation_mean_recall@10": 0.1282051282051282,
+          "top10_jaccard": 0.1437908496732026
+        },
+        {
+          "qid": "q14",
+          "original_recall@10": 0.29411764705882354,
+          "reformulation_mean_recall@10": 0.1764705882352941,
+          "top10_jaccard": 0.2222222222222222
+        },
+        {
+          "qid": "q15",
+          "original_recall@10": 0.4,
+          "reformulation_mean_recall@10": 0.28,
+          "top10_jaccard": 0.3333333333333333
+        },
+        {
+          "qid": "q16",
+          "original_recall@10": 0.2222222222222222,
+          "reformulation_mean_recall@10": 0.125,
+          "top10_jaccard": 0.16666666666666666
+        },
+        {
+          "qid": "q17",
+          "original_recall@10": 0.38461538461538464,
+          "reformulation_mean_recall@10": 0.3653846153846154,
+          "top10_jaccard": 0.38095238095238093
+        },
+        {
+          "qid": "q18",
+          "original_recall@10": 0.375,
+          "reformulation_mean_recall@10": 0.3125,
+          "top10_jaccard": 0.42857142857142855
+        },
+        {
+          "qid": "q19",
+          "original_recall@10": 0.23076923076923078,
+          "reformulation_mean_recall@10": 0.1282051282051282,
+          "top10_jaccard": 0.18055555555555555
+        },
+        {
+          "qid": "q20",
+          "original_recall@10": 0.29411764705882354,
+          "reformulation_mean_recall@10": 0.1323529411764706,
+          "top10_jaccard": 0.1437908496732026
+        }
+      ]
+    },
+    "bm25_title_abs": {
+      "mean_original_recall@10": 0.3096789925032037,
+      "mean_reformulation_recall@10": 0.15276328115074211,
+      "mean_top10_jaccard": 0.20872707443914879,
+      "per_query": [
+        {
+          "qid": "q01",
+          "original_recall@10": 0.2631578947368421,
+          "reformulation_mean_recall@10": 0.11842105263157894,
+          "top10_jaccard": 0.18055555555555555
+        },
+        {
+          "qid": "q02",
+          "original_recall@10": 0.24390243902439024,
+          "reformulation_mean_recall@10": 0.07317073170731708,
+          "top10_jaccard": 0.08187134502923976
+        },
+        {
+          "qid": "q03",
+          "original_recall@10": 0.3333333333333333,
+          "reformulation_mean_recall@10": 0.15,
+          "top10_jaccard": 0.21323529411764708
+        },
+        {
+          "qid": "q04",
+          "original_recall@10": 0.2564102564102564,
+          "reformulation_mean_recall@10": 0.11538461538461538,
+          "top10_jaccard": 0.18055555555555555
+        },
+        {
+          "qid": "q05",
+          "original_recall@10": 0.3225806451612903,
+          "reformulation_mean_recall@10": 0.29032258064516125,
+          "top10_jaccard": 0.7424242424242424
+        },
+        {
+          "qid": "q06",
+          "original_recall@10": 0.36,
+          "reformulation_mean_recall@10": 0.22000000000000003,
+          "top10_jaccard": 0.3392857142857143
+        },
+        {
+          "qid": "q07",
+          "original_recall@10": 0.3333333333333333,
+          "reformulation_mean_recall@10": 0.21666666666666667,
+          "top10_jaccard": 0.48351648351648346
+        },
+        {
+          "qid": "q08",
+          "original_recall@10": 0.4,
+          "reformulation_mean_recall@10": 0.13999999999999999,
+          "top10_jaccard": 0.1513157894736842
+        },
+        {
+          "qid": "q09",
+          "original_recall@10": 0.2631578947368421,
+          "reformulation_mean_recall@10": 0.14473684210526316,
+          "top10_jaccard": 0.1513157894736842
+        },
+        {
+          "qid": "q10",
+          "original_recall@10": 0.2564102564102564,
+          "reformulation_mean_recall@10": 0.15384615384615385,
+          "top10_jaccard": 0.21323529411764708
+        },
+        {
+          "qid": "q11",
+          "original_recall@10": 0.3125,
+          "reformulation_mean_recall@10": 0.140625,
+          "top10_jaccard": 0.1513157894736842
+        },
+        {
+          "qid": "q12",
+          "original_recall@10": 0.3103448275862069,
+          "reformulation_mean_recall@10": 0.2413793103448276,
+          "top10_jaccard": 0.32478632478632474
+        },
+        {
+          "qid": "q13",
+          "original_recall@10": 0.2564102564102564,
+          "reformulation_mean_recall@10": 0.10256410256410256,
+          "top10_jaccard": 0.17647058823529413
+        },
+        {
+          "qid": "q14",
+          "original_recall@10": 0.29411764705882354,
+          "reformulation_mean_recall@10": 0.07352941176470588,
+          "top10_jaccard": 0.05555555555555555
+        },
+        {
+          "qid": "q15",
+          "original_recall@10": 0.4,
+          "reformulation_mean_recall@10": 0.12,
+          "top10_jaccard": 0.125
+        },
+        {
+          "qid": "q16",
+          "original_recall@10": 0.2777777777777778,
+          "reformulation_mean_recall@10": 0.08333333333333333,
+          "top10_jaccard": 0.0
+        },
+        {
+          "qid": "q17",
+          "original_recall@10": 0.38461538461538464,
+          "reformulation_mean_recall@10": 0.21153846153846156,
+          "top10_jaccard": 0.21323529411764708
+        },
+        {
+          "qid": "q18",
+          "original_recall@10": 0.375,
+          "reformulation_mean_recall@10": 0.27083333333333337,
+          "top10_jaccard": 0.25
+        },
+        {
+          "qid": "q19",
+          "original_recall@10": 0.2564102564102564,
+          "reformulation_mean_recall@10": 0.11538461538461538,
+          "top10_jaccard": 0.11455108359133127
+        },
+        {
+          "qid": "q20",
+          "original_recall@10": 0.29411764705882354,
+          "reformulation_mean_recall@10": 0.07352941176470588,
+          "top10_jaccard": 0.02631578947368421
+        }
+      ]
+    },
+    "specter2_abs": {
+      "mean_original_recall@10": 0.3027408497324838,
+      "mean_reformulation_recall@10": 0.17816632973447408,
+      "mean_top10_jaccard": 0.25553062993078474,
+      "per_query": [
+        {
+          "qid": "q01",
+          "original_recall@10": 0.15789473684210525,
+          "reformulation_mean_recall@10": 0.05263157894736842,
+          "top10_jaccard": 0.05555555555555555
+        },
+        {
+          "qid": "q02",
+          "original_recall@10": 0.24390243902439024,
+          "reformulation_mean_recall@10": 0.13414634146341464,
+          "top10_jaccard": 0.25
+        },
+        {
+          "qid": "q03",
+          "original_recall@10": 0.3333333333333333,
+          "reformulation_mean_recall@10": 0.16666666666666666,
+          "top10_jaccard": 0.21428571428571427
+        },
+        {
+          "qid": "q04",
+          "original_recall@10": 0.2564102564102564,
+          "reformulation_mean_recall@10": 0.10256410256410256,
+          "top10_jaccard": 0.08187134502923976
+        },
+        {
+          "qid": "q05",
+          "original_recall@10": 0.3225806451612903,
+          "reformulation_mean_recall@10": 0.2096774193548387,
+          "top10_jaccard": 0.21323529411764708
+        },
+        {
+          "qid": "q06",
+          "original_recall@10": 0.36,
+          "reformulation_mean_recall@10": 0.36,
+          "top10_jaccard": 0.4358974358974359
+        },
+        {
+          "qid": "q07",
+          "original_recall@10": 0.3333333333333333,
+          "reformulation_mean_recall@10": 0.21666666666666667,
+          "top10_jaccard": 0.38888888888888884
+        },
+        {
+          "qid": "q08",
+          "original_recall@10": 0.4,
+          "reformulation_mean_recall@10": 0.14,
+          "top10_jaccard": 0.16666666666666666
+        },
+        {
+          "qid": "q09",
+          "original_recall@10": 0.23684210526315788,
+          "reformulation_mean_recall@10": 0.05263157894736842,
+          "top10_jaccard": 0.08187134502923976
+        },
+        {
+          "qid": "q10",
+          "original_recall@10": 0.2564102564102564,
+          "reformulation_mean_recall@10": 0.15384615384615385,
+          "top10_jaccard": 0.18055555555555555
+        },
+        {
+          "qid": "q11",
+          "original_recall@10": 0.3125,
+          "reformulation_mean_recall@10": 0.21875,
+          "top10_jaccard": 0.4583333333333333
+        },
+        {
+          "qid": "q12",
+          "original_recall@10": 0.3448275862068966,
+          "reformulation_mean_recall@10": 0.3275862068965517,
+          "top10_jaccard": 0.48351648351648346
+        },
+        {
+          "qid": "q13",
+          "original_recall@10": 0.2564102564102564,
+          "reformulation_mean_recall@10": 0.11538461538461538,
+          "top10_jaccard": 0.2549019607843137
+        },
+        {
+          "qid": "q14",
+          "original_recall@10": 0.29411764705882354,
+          "reformulation_mean_recall@10": 0.25,
+          "top10_jaccard": 0.48351648351648346
+        },
+        {
+          "qid": "q15",
+          "original_recall@10": 0.4,
+          "reformulation_mean_recall@10": 0.24000000000000002,
+          "top10_jaccard": 0.38888888888888884
+        },
+        {
+          "qid": "q16",
+          "original_recall@10": 0.2777777777777778,
+          "reformulation_mean_recall@10": 0.125,
+          "top10_jaccard": 0.2222222222222222
+        },
+        {
+          "qid": "q17",
+          "original_recall@10": 0.38461538461538464,
+          "reformulation_mean_recall@10": 0.23076923076923078,
+          "top10_jaccard": 0.1437908496732026
+        },
+        {
+          "qid": "q18",
+          "original_recall@10": 0.3333333333333333,
+          "reformulation_mean_recall@10": 0.20833333333333331,
+          "top10_jaccard": 0.2549019607843137
+        },
+        {
+          "qid": "q19",
+          "original_recall@10": 0.2564102564102564,
+          "reformulation_mean_recall@10": 0.14102564102564102,
+          "top10_jaccard": 0.24060150375939848
+        },
+        {
+          "qid": "q20",
+          "original_recall@10": 0.29411764705882354,
+          "reformulation_mean_recall@10": 0.11764705882352941,
+          "top10_jaccard": 0.1111111111111111
+        }
+      ]
+    }
+  }
+}

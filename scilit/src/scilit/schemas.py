@@ -61,6 +61,8 @@ class Venue(str, Enum):
     ACL = "acl"
     EMNLP = "emnlp"
     NAACL = "naacl"
+    EACL = "eacl"
+    CONLL = "conll"
     COLING = "coling"
     ICLR = "iclr"
     NEURIPS = "neurips"
@@ -207,6 +209,7 @@ class Article(BaseModel):
     cited_by_count: int = 0
     referenced_works: list[str] = Field(default_factory=list)
     venue_name: str | None = None
+    license: str | None = None
     keywords: list[str] = Field(default_factory=list)
     raw_text: str | None = None     # texte brut complet (conservé pour audit)
     split: SplitType = SplitType.TRAIN
@@ -237,6 +240,7 @@ class Section(BaseModel):
     page_start: int | None = None
     page_end: int | None = None
     section_index: int                  # ordre dans l'article (0-based)
+    parse_mode: str = "abstract"
     # Champs prédits par SciBERT
     predicted_type: SectionType | None = None
     classifier_confidence: float | None = Field(None, ge=0.0, le=1.0)
@@ -266,6 +270,7 @@ class Chunk(BaseModel):
     char_end: int
     chunk_index: int                    # ordre dans la section (0-based)
     token_count: int | None = None
+    parse_mode: str = "abstract"
     # Exclu de la sérialisation JSON — persisté séparément en base vectorielle
     embedding: list[float] | None = Field(None, exclude=True)
 
@@ -331,6 +336,11 @@ class InTextCitation(BaseModel):
     target_article_id: UUID | None = None   # article cité (None = hors corpus)
     target_raw_ref: str                 # ex. "[Smith et al., 2022]"
     context_sentence: str               # phrase contenant la citation
+    marker_text: str | None = None
+    context_window: str = ""
+    section_type: SectionType = SectionType.OTHER
+    reference_entry: str | None = None
+    reference_linked: bool = False
     function: CitationFunction = CitationFunction.UNDEFINED
     function_confidence: float | None = Field(None, ge=0.0, le=1.0)
     chunk_id: UUID | None = None        # chunk source
@@ -423,29 +433,37 @@ class RankedResult(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-class ComparativeRow(BaseModel):
-    """
-    Ligne du tableau comparatif généré par LLM à sortie structurée (Lot D).
-    source_claim_id permet de remonter au verbatim source pour l'audit.
-    verbatim_snippet ≤ 15 mots : respecte la règle de citation du module.
-    """
-    model_or_method: str
-    dataset: str | None = None
-    metric_name: str
-    metric_value: str               # str : supporte "92.3 ± 0.4" ou "—"
-    source_claim_id: UUID
-    source_article_id: UUID
-    verbatim_snippet: str           # extrait source ≤ 15 mots (traçabilité)
+class ComparativeCell(BaseModel):
+    text: str
+    claim_id: UUID | None = None
+    chunk_id: UUID | None = None
+    verbatim: bool = True
 
-    @field_validator("verbatim_snippet")
-    @classmethod
-    def snippet_length(cls, v: str) -> str:
-        words = v.split()
-        if len(words) > 20:
-            raise ValueError(
-                f"verbatim_snippet trop long ({len(words)} mots) — risque copyright"
-            )
-        return v
+    @model_validator(mode="after")
+    def source_is_present(self) -> ComparativeCell:
+        if (self.claim_id is None) == (self.chunk_id is None):
+            raise ValueError("exactly one of claim_id or chunk_id is required")
+        return self
+
+
+class ComparativeRow(BaseModel):
+    """Article comparison row; every verbatim snippet is at most 25 words."""
+    article_id: UUID
+    question: list[ComparativeCell] = Field(default_factory=list)
+    method: list[ComparativeCell] = Field(default_factory=list)
+    data: list[ComparativeCell] = Field(default_factory=list)
+    results: list[ComparativeCell] = Field(default_factory=list)
+    limitations: list[ComparativeCell] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def snippet_lengths(self) -> ComparativeRow:
+        cells = (
+            self.question + self.method + self.data
+            + self.results + self.limitations
+        )
+        if any(len(cell.text.split()) > 25 for cell in cells):
+            raise ValueError("verbatim snippets must contain at most 25 words")
+        return self
 
 
 class ComparativeTable(BaseModel):
@@ -467,6 +485,7 @@ class VerifiedSentence(BaseModel):
     hallucination_rate = nb HALLUCINATED / total citations de cette phrase.
     """
     text: str
+    theme_heading: str | None = None
     citations: list[UUID]                            # IDs des articles cités
     verification_statuses: list[VerificationStatus]  # 1 statut par citation
     supporting_claim_ids: list[UUID]                 # claims qui soutiennent la phrase

@@ -17,9 +17,11 @@ Usage :
 """
 from __future__ import annotations
 
+import csv
 import json
 import logging
 from functools import lru_cache
+from io import StringIO
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
@@ -209,7 +211,79 @@ def get_article(article_id: str):
     if article is None:
         raise HTTPException(status_code=404, detail=f"Article '{article_id}' not found.")
     claims = [claim for claim in _get_claims() if claim.get("article_id") == article_id]
-    return {"article": article, "claims": claims}
+    from scilit.corpus.parse import load_chunks, load_sections
+    from scilit.extraction.grid import build_comparison_grid
+
+    rows = build_comparison_grid(
+        [article_id], _get_articles(), claims, load_sections(), load_chunks()
+    )
+    return {"article": article, "claims": claims, "grid": rows[0] if rows else None}
+
+
+def _table_rows(article_ids: list[str]):
+    from scilit.corpus.parse import load_chunks, load_sections
+    from scilit.extraction.grid import build_comparison_grid
+
+    return build_comparison_grid(
+        article_ids,
+        _get_articles(),
+        _get_claims(),
+        load_sections(),
+        load_chunks(),
+    )
+
+
+@app.get("/table", summary="Comparison grid from search results")
+def get_table(
+    q: str = Query(..., min_length=2),
+    k: int = Query(10, ge=1, le=50),
+    format: Literal["json", "csv", "md"] = "json",
+):
+    result = search(SearchRequest(query=q, k=min(k * 5, 100), mode="rrf"))
+    article_ids = list(dict.fromkeys(item.article_id for item in result.results))[:k]
+    rows = _table_rows(article_ids)
+    if format == "json":
+        return rows
+    articles = _get_articles()
+    columns = ("question", "method", "data", "results", "limitations")
+    serialized = [
+        {
+            "article_id": str(row.article_id),
+            "title": articles[str(row.article_id)].get("title", ""),
+            **{
+                name: " | ".join(cell.text for cell in getattr(row, name))
+                for name in columns
+            },
+        }
+        for row in rows
+    ]
+    if format == "md":
+        header = "| " + " | ".join(("Title", *columns)) + " |"
+        separator = "| " + " | ".join("---" for _ in range(6)) + " |"
+        body = [
+            "| " + " | ".join(
+                [item["title"]] + [item[name] for name in columns]
+            ) + " |"
+            for item in serialized
+        ]
+        return PlainTextResponse("\n".join([header, separator, *body]))
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=["article_id", "title", *columns])
+    writer.writeheader()
+    writer.writerows(serialized)
+    return PlainTextResponse(output.getvalue(), media_type="text/csv")
+
+
+@app.post("/table", summary="Comparison grid for explicit article IDs")
+def post_table(payload: dict):
+    article_ids = payload.get("article_ids")
+    if not isinstance(article_ids, list) or not article_ids:
+        raise HTTPException(status_code=422, detail="article_ids must be a non-empty list")
+    articles = _get_articles()
+    missing = [str(item) for item in article_ids if str(item) not in articles]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Unknown article IDs: {', '.join(missing)}")
+    return _table_rows(list(dict.fromkeys(str(item) for item in article_ids)))
 
 
 @app.get(
@@ -317,6 +391,33 @@ def get_review(slug: str):
         if path.exists():
             return json.loads(path.read_text(encoding="utf-8"))
     raise HTTPException(status_code=404, detail=f"Review '{slug}' introuvable.")
+
+
+@app.get(
+    "/review/{slug}/markdown",
+    response_class=PlainTextResponse,
+    summary="Render a ReviewDraft as Markdown",
+)
+def get_review_markdown(slug: str, badges: bool = True):
+    from scilit.generation.render import render_review_markdown
+    from scilit.schemas import ReviewDraft
+
+    reviews_dir = config.paths().reviews
+    path = next(
+        (
+            reviews_dir / f"{slug}{suffix}.json"
+            for suffix in ("_verified", "")
+            if (reviews_dir / f"{slug}{suffix}.json").exists()
+        ),
+        None,
+    )
+    if path is None:
+        raise HTTPException(status_code=404, detail=f"Review '{slug}' introuvable.")
+    draft = ReviewDraft.model_validate_json(path.read_text(encoding="utf-8"))
+    return PlainTextResponse(
+        render_review_markdown(draft, _get_articles(), include_badges=badges),
+        media_type="text/markdown",
+    )
 
 
 @app.get(

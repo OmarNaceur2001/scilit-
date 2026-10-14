@@ -9,6 +9,8 @@ htmlcov/
 data/raw/*
 data/raw/*.gz
 data/raw/pdfs/
+data/pdfs/
+data/eval/*.log
 !data/raw/articles.jsonl
 !data/raw/manifest.json
 data/parsed/*
@@ -21,6 +23,8 @@ data/parsed/*
 !data/parsed/bm25_meta.json
 !data/parsed/faiss_index.bin
 !data/parsed/faiss_meta.json
+!data/parsed/intext_citations.jsonl
+!data/parsed/experiments.jsonl
 !data/parsed/reviews/
 *.pdf
 models/

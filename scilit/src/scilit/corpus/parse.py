@@ -61,18 +61,18 @@ MAX_PDF_SIZE   = 20_000_000  # 20 MB max
 # Heuristiques de detection de sections (Silver)
 SECTION_PATTERNS: list[tuple[re.Pattern, SectionType]] = [
     (re.compile(r"^abstract\b",              re.I), SectionType.ABSTRACT),
-    (re.compile(r"^1\.?\s*introduction\b",   re.I), SectionType.INTRODUCTION),
+    (re.compile(r"^intro(?:duction)?\b",     re.I), SectionType.INTRODUCTION),
     (re.compile(r"^related\s+work\b",        re.I), SectionType.RELATED_WORK),
     (re.compile(r"^background\b",            re.I), SectionType.RELATED_WORK),
-    (re.compile(r"^(2|3)\.?\s*(method|approach|model|system)\b", re.I), SectionType.METHOD),
-    (re.compile(r"^(3|4)\.?\s*(experiment|setup|dataset)\b",     re.I), SectionType.EXPERIMENT),
-    (re.compile(r"^(4|5)\.?\s*(result|evaluation|analysis)\b",   re.I), SectionType.RESULTS),
-    (re.compile(r"^discussion\b",            re.I), SectionType.DISCUSSION),
-    (re.compile(r"^(5|6|7)\.?\s*conclusion", re.I), SectionType.CONCLUSION),
-    (re.compile(r"^limitation\b",            re.I), SectionType.LIMITATIONS),
-    (re.compile(r"^acknowledgement\b",       re.I), SectionType.ACKNOWLEDGEMENTS),
-    (re.compile(r"^reference\b",             re.I), SectionType.REFERENCES),
-    (re.compile(r"^appendix\b",              re.I), SectionType.APPENDIX),
+    (re.compile(r"^(methods?|approach|model|system)\b", re.I), SectionType.METHOD),
+    (re.compile(r"^(experiments?|setup|datasets?|data)\b", re.I), SectionType.EXPERIMENT),
+    (re.compile(r"^(results?|evaluation|analysis)\b", re.I), SectionType.RESULTS),
+    (re.compile(r"^discussions?\b", re.I), SectionType.DISCUSSION),
+    (re.compile(r"^conclusion\b",             re.I), SectionType.CONCLUSION),
+    (re.compile(r"^limitations?\b",          re.I), SectionType.LIMITATIONS),
+    (re.compile(r"^acknowledgements?\b", re.I), SectionType.ACKNOWLEDGEMENTS),
+    (re.compile(r"^references?\b|^bibliography\b", re.I), SectionType.REFERENCES),
+    (re.compile(r"^append(?:ix|ices)\b", re.I), SectionType.APPENDIX),
 ]
 
 # =============================================================================
@@ -92,6 +92,7 @@ def chunk_text(
     section_type: SectionType,
     size: int = CHUNK_SIZE_CHARS,
     overlap: int = CHUNK_OVERLAP_CHARS,
+    parse_mode: str = "abstract",
 ) -> list[Chunk]:
     """
     Decoupe un texte en Chunks avec overlap.
@@ -130,6 +131,7 @@ def chunk_text(
                 char_end=end,
                 chunk_index=idx,
                 token_count=len(fragment) // 4,   # estimation
+                parse_mode=parse_mode,
             ))
             idx += 1
 
@@ -233,10 +235,12 @@ def run_bronze(
 
 def _pdf_url_for(article: Article) -> str | None:
     """Retourne l'URL PDF open-access si disponible."""
-    if article.source.pdf_url:
-        return str(article.source.pdf_url)
+    if article.source.acl_id:
+        return f"https://aclanthology.org/{article.source.acl_id}.pdf"
     if article.source.arxiv_id:
         return f"https://arxiv.org/pdf/{article.source.arxiv_id}"
+    if article.source.pdf_url:
+        return str(article.source.pdf_url)
     return None
 
 
@@ -245,7 +249,12 @@ def _download_pdf(url: str, dest: Path) -> bool:
     if dest.exists() and dest.stat().st_size > 1000:
         return True
     try:
-        r = requests.get(url, timeout=PDF_TIMEOUT, stream=True)
+        r = requests.get(
+            url,
+            timeout=PDF_TIMEOUT,
+            stream=True,
+            headers={"User-Agent": "SciLit/0.2.0"},
+        )
         r.raise_for_status()
         size = 0
         with open(dest, "wb") as f:
@@ -265,11 +274,194 @@ def _download_pdf(url: str, dest: Path) -> bool:
 
 def _detect_section_type(title_line: str) -> SectionType:
     """Detecte le type de section depuis un titre."""
-    t = title_line.strip()
+    t = re.sub(r"^\s*\d+(?:\.\d+)*\.?\s*", "", title_line.strip())
     for pattern, stype in SECTION_PATTERNS:
         if pattern.match(t):
             return stype
     return SectionType.OTHER
+
+
+def _reference_entries(lines: list[str]) -> list[str]:
+    entries: list[str] = []
+    current = ""
+    numeric_start = re.compile(
+        r"(?<!\S)(?:\[\d{1,3}\]|\d{1,3}[.)]?)[ \t]+(?=[A-Z])"
+    )
+    author_start = re.compile(r"^\s*[A-Z][A-Za-z’'’-]+,\s+")
+
+    def append_piece(piece: str, starts_entry: bool = False) -> None:
+        nonlocal current
+        piece = piece.strip()
+        if not piece:
+            return
+        if starts_entry or (
+            current
+            and author_start.match(piece)
+            and re.search(r"\b(?:18|19|20)\d{2}[a-z]?\b", current, re.I)
+        ):
+            if current:
+                entries.append(current.strip())
+            current = piece
+        elif current:
+            current = f"{current} {piece}"
+        else:
+            current = piece
+
+    for line in lines:
+        line = re.sub(r"\s+", " ", line).strip()
+        if not line:
+            continue
+        matches = list(numeric_start.finditer(line))
+        if not matches:
+            append_piece(line)
+            continue
+        if matches[0].start():
+            append_piece(line[:matches[0].start()])
+        for index, match in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(line)
+            append_piece(line[match.start():end], starts_entry=True)
+    if current:
+        entries.append(current.strip())
+    return entries
+
+
+def _extract_fulltext_sections(pdf_path: Path, article: Article) -> list[Section]:
+    import pymupdf as fitz
+
+    doc = fitz.open(str(pdf_path))
+    lines: list[tuple[str, float, bool]] = []
+    for page in doc:
+        for block in page.get_text("dict")["blocks"]:
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                spans = line.get("spans", [])
+                text = "".join(span.get("text", "") for span in spans).strip()
+                if text:
+                    lines.append((
+                        text,
+                        max((span.get("size", 0) for span in spans), default=0),
+                        any(span.get("flags", 0) & 16 for span in spans),
+                    ))
+    doc.close()
+    if not lines:
+        return []
+    sizes = sorted(size for _, size, _ in lines if size > 0)
+    body_size = sizes[len(sizes) // 2] if sizes else 10.0
+    sections: list[Section] = []
+    ref_lines: list[str] = []
+    section_type = SectionType.OTHER
+    section_title: str | None = None
+    text_lines: list[str] = []
+    offset = section_index = 0
+    in_references = False
+    saw_body_start = False
+    body_start_types = {
+        SectionType.ABSTRACT,
+        SectionType.INTRODUCTION,
+        SectionType.RELATED_WORK,
+        SectionType.METHOD,
+        SectionType.EXPERIMENT,
+        SectionType.RESULTS,
+    }
+
+    def heading_details(text: str, size: float, bold: bool):
+        normalized = re.sub(r"^\s*\d+(?:\.\d+)*\.?\s*", "", text)
+        kind = _detect_section_type(text)
+        known = (
+            kind != SectionType.OTHER
+            and len(normalized.split()) <= 12
+            and len(text) <= 100
+            and not re.search(r"[.!?,;:]$", text)
+            and (bold or size >= body_size * 1.05 or len(normalized.split()) <= 3)
+        )
+        numbered = (
+            bool(re.match(r"^\s*\d+(?:\.\d+)*\.?\s+[A-Za-z]\w*", text))
+            and len(normalized.split()) <= 10
+            and not re.search(r"[.!?]\s", normalized)
+            and not re.search(r"[.!?,;:]$", text)
+        )
+        styled = (
+            (size >= body_size * 1.25 or (bold and size >= body_size * 1.05))
+            and len(text) <= 80
+            and len(text.split()) <= 8
+            and not re.search(r"[.!?,;:]$", text)
+            and text[:1].isupper()
+        )
+        return normalized, kind, known or numbered, styled
+
+    reference_heading_index = None
+    prepass_body_start = False
+    for line_index, (text, size, bold) in enumerate(lines):
+        _, kind, structural, styled = heading_details(text, size, bold)
+        if not prepass_body_start:
+            if structural and kind in body_start_types:
+                prepass_body_start = True
+        elif (structural or styled) and kind == SectionType.REFERENCES:
+            reference_heading_index = line_index
+
+    def flush() -> None:
+        nonlocal offset, section_index, text_lines
+        text = " ".join(text_lines).strip()
+        if text:
+            end = offset + len(text)
+            sections.append(Section(
+                id=uuid5(article.id, f"section:{section_index}"),
+                article_id=article.id,
+                section_type=section_type,
+                title=section_title,
+                text=text,
+                char_start=offset,
+                char_end=end,
+                section_index=section_index,
+                parse_mode="fulltext",
+            ))
+            offset = end + 1
+            section_index += 1
+        text_lines = []
+
+    for line_index, (text, size, bold) in enumerate(lines):
+        normalized, kind, structural, styled = heading_details(text, size, bold)
+        heading = structural or (saw_body_start and styled)
+        if not saw_body_start:
+            if structural and kind in body_start_types:
+                saw_body_start = True
+            else:
+                continue
+        if not saw_body_start:
+            continue
+        if heading and kind == SectionType.REFERENCES:
+            if line_index != reference_heading_index:
+                text_lines.append(text)
+                continue
+            flush()
+            in_references = True
+            section_title = normalized
+            continue
+        if in_references:
+            ref_lines.append(text)
+        elif heading:
+            flush()
+            section_type, section_title = kind, text
+        else:
+            text_lines.append(text)
+    if not in_references:
+        flush()
+    entries = _reference_entries(ref_lines)
+    if entries:
+        text = "\n".join(entries)
+        sections.append(Section(
+            id=uuid5(article.id, f"section:{section_index}"),
+            article_id=article.id,
+            section_type=SectionType.REFERENCES,
+            title="References",
+            text=text,
+            char_start=offset,
+            char_end=offset + len(text),
+            section_index=section_index,
+            parse_mode="fulltext",
+        ))
+    return sections
 
 
 def _extract_sections_pymupdf(pdf_path: Path, article: Article) -> list[Section]:
@@ -279,7 +471,7 @@ def _extract_sections_pymupdf(pdf_path: Path, article: Article) -> list[Section]
     SciBERT remplacera ceci au palier Silver-avance (Lot C).
     """
     try:
-        import fitz  # PyMuPDF
+        import pymupdf as fitz
     except ImportError:
         log.error("PyMuPDF non installe : pip install pymupdf")
         return []
@@ -377,9 +569,16 @@ def _extract_sections_pymupdf(pdf_path: Path, article: Article) -> list[Section]
     return sections
 
 
+def _is_redistributable(article: Article) -> bool:
+    license_name = (article.license or "").casefold()
+    return bool(article.source.acl_id) or license_name.startswith(
+        ("cc-by", "cc0", "public-domain")
+    )
+
+
 def run_silver(
     articles: list[Article],
-    max_articles: int = 100,
+    max_articles: int = 300,
     sections_path: Path | None = None,
     chunks_path: Path | None = None,
 ) -> tuple[int, int]:
@@ -392,56 +591,74 @@ def run_silver(
     chunks_path = chunks_path or paths.parsed / "chunks.jsonl"
     sections_path.parent.mkdir(parents=True, exist_ok=True)
     chunks_path.parent.mkdir(parents=True, exist_ok=True)
-    log.info(f"Silver : traitement de {min(max_articles, len(articles))} articles...")
+    section_rows = load_sections(sections_path)
+    chunk_rows = load_chunks(chunks_path)
+    section_done = {
+        str(item.article_id) for item in section_rows
+        if item.parse_mode == "fulltext"
+    }
+    chunk_done = {
+        str(item.article_id) for item in chunk_rows
+        if item.parse_mode == "fulltext"
+    }
+    completed = section_done & chunk_done
+    selected = sorted(
+        (a for a in articles if _is_redistributable(a)),
+        key=lambda a: a.cited_by_count,
+        reverse=True,
+    )[:max_articles]
     total_s = total_c = downloaded = failed = 0
-
-    mode_s = "a" if sections_path.exists() else "w"
-    mode_c = "a" if chunks_path.exists()   else "w"
-
+    pdf_dir = paths.raw.parent / "pdfs"
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+    last_arxiv_request: float | None = None
+    log.info("Silver : traitement de %d articles licenciés.", len(selected))
     with (
-        open(sections_path, mode_s, encoding="utf-8") as fs,
-        open(chunks_path,   mode_c, encoding="utf-8") as fc,
+        open(sections_path, "a", encoding="utf-8") as fs,
+        open(chunks_path, "a", encoding="utf-8") as fc,
     ):
-        for article in tqdm(articles[:max_articles], desc="Silver PDF", ncols=80):
+        for article in tqdm(selected, desc="Silver PDF", ncols=80):
+            if str(article.id) in completed:
+                continue
             pdf_url = _pdf_url_for(article)
             if not pdf_url:
-                # Fallback Bronze
-                sections, chunks = parse_abstract(article)
-            else:
-                safe_name = article.corpus_id + ".pdf"
-                pdf_path = paths.raw / "pdfs" / safe_name
-                pdf_path.parent.mkdir(parents=True, exist_ok=True)
-
-                ok = _download_pdf(pdf_url, pdf_path)
-                if ok:
-                    downloaded += 1
-                    sections = _extract_sections_pymupdf(pdf_path, article)
-                    if not sections:
-                        sections, _ = parse_abstract(article)
-                else:
-                    failed += 1
-                    sections, _ = parse_abstract(article)
-
-                time.sleep(PDF_DELAY)
-
-            # Chunks depuis chaque section
-            chunks: list[Chunk] = []
-            for s in sections:
+                failed += 1
+                continue
+            is_arxiv = "arxiv.org/pdf/" in pdf_url
+            pdf_path = pdf_dir / f"{article.corpus_id}.pdf"
+            cached_pdf = pdf_path.exists() and pdf_path.stat().st_size > 1000
+            if is_arxiv and not cached_pdf and last_arxiv_request is not None:
+                time.sleep(max(0, 3.0 - (time.monotonic() - last_arxiv_request)))
+            if not _download_pdf(pdf_url, pdf_path):
+                failed += 1
+                if is_arxiv:
+                    last_arxiv_request = time.monotonic()
+                continue
+            if is_arxiv:
+                last_arxiv_request = time.monotonic()
+            downloaded += 1
+            try:
+                sections = _extract_fulltext_sections(pdf_path, article)
+            except Exception as exc:
+                log.warning("PDF parse failed for %s: %s", article.corpus_id, exc)
+                failed += 1
+                continue
+            chunks = []
+            for section in sections:
                 chunks.extend(chunk_text(
-                    text=s.text,
-                    article_id=article.id,
-                    section_id=s.id,
-                    section_type=s.section_type,
+                    section.text,
+                    article.id,
+                    section.id,
+                    section.section_type,
+                    parse_mode="fulltext",
                 ))
-
-            for s in sections:
-                fs.write(s.model_dump_json() + "\n")
+            for section in sections:
+                fs.write(section.model_dump_json() + "\n")
                 total_s += 1
-            for c in chunks:
-                fc.write(c.model_dump_json(exclude={"embedding"}) + "\n")
+            for chunk in chunks:
+                fc.write(chunk.model_dump_json(exclude={"embedding"}) + "\n")
                 total_c += 1
-
-    log.info(f"Silver : PDF ok={downloaded} echec={failed}")
+            completed.add(str(article.id))
+    log.info("Silver : PDF ok=%d echec=%d.", downloaded, failed)
     return total_s, total_c
 
 # =============================================================================

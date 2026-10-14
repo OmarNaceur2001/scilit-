@@ -18,7 +18,9 @@ import argparse
 import json
 import logging
 import re
+import tempfile
 import time
+from collections import Counter
 from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
@@ -155,6 +157,196 @@ def _extract_arxiv_id(work: dict) -> str | None:
             if match:
                 return match.group(1)
     return None
+
+
+def _acl_id_from_doi(doi: str | None) -> str | None:
+    if not doi:
+        return None
+    normalized_doi = re.sub(r"^https?://doi\.org/", "", doi.strip(), flags=re.I)
+    match = re.match(r"^10\.18653/v1/(.+)$", normalized_doi, re.I)
+    if not match:
+        return None
+    acl_id = match.group(1).strip().rstrip("/")
+    if re.fullmatch(r"[a-z]\d{2}-\d{3,5}", acl_id, re.I):
+        return f"{acl_id[0].upper()}{acl_id[1:]}"
+    if re.fullmatch(r"\d{4}\.[a-z0-9-]+\.\d+", acl_id, re.I):
+        return acl_id.lower()
+    return None
+
+
+def _venue_from_acl_id(acl_id: str) -> Venue:
+    identifier = acl_id.lower()
+    if ".emnlp-" in identifier or "findings-emnlp" in identifier:
+        return Venue.EMNLP
+    if ".naacl-" in identifier or "findings-naacl" in identifier:
+        return Venue.NAACL
+    if ".eacl-" in identifier or re.match(r"^e\d{2}-", identifier):
+        return Venue.EACL
+    if ".coling-" in identifier or re.match(r"^c\d{2}-", identifier):
+        return Venue.COLING
+    if re.match(r"^d\d{2}-", identifier):
+        return Venue.CONLL
+    if ".acl-" in identifier or "findings-acl" in identifier:
+        return Venue.ACL
+    if re.match(r"^n\d{2}-", identifier):
+        return Venue.NAACL
+    if re.match(r"^p\d{2}-", identifier):
+        return Venue.ACL
+    return Venue.OTHER
+
+
+def _venue_from_name(name: str | None) -> Venue:
+    value = (name or "").casefold()
+    for needle, venue in (
+        ("arxiv", Venue.ARXIV),
+        ("emnlp", Venue.EMNLP),
+        ("naacl", Venue.NAACL),
+        ("eacl", Venue.EACL),
+        ("conll", Venue.CONLL),
+        ("coling", Venue.COLING),
+        ("acl", Venue.ACL),
+        ("neurips", Venue.NEURIPS),
+        ("iclr", Venue.ICLR),
+        ("icml", Venue.ICML),
+    ):
+        if needle in value:
+            return venue
+    return Venue.OTHER
+
+
+def enrich_acl_ids(articles_path: Path | None = None) -> int:
+    """Enrichit les articles existants depuis le DOI ACL sans modifier leurs IDs."""
+    articles_path = articles_path or config.paths().raw / "articles.jsonl"
+    if not articles_path.exists():
+        raise FileNotFoundError(articles_path)
+
+    migrated: list[str] = []
+    updated_count = 0
+    for line in articles_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        article = Article.model_validate_json(line)
+        acl_id = _acl_id_from_doi(article.doi or article.source.doi)
+        if acl_id:
+            source_data = article.source.model_dump()
+            source_data.update({
+                "acl_id": acl_id,
+                "venue": _venue_from_acl_id(acl_id),
+                "url": f"https://aclanthology.org/{acl_id}",
+                "pdf_url": f"https://aclanthology.org/{acl_id}.pdf",
+                "license": "CC BY 4.0",
+            })
+            source = ArticleSource.model_validate(source_data)
+            article = article.model_copy(update={"source": source})
+            updated_count += 1
+        elif article.source.acl_id and not re.fullmatch(
+            r"(?:[A-Z]\d{2}-\d{3,5}|\d{4}\.[a-z0-9-]+\.\d+)",
+            article.source.acl_id,
+            re.I,
+        ):
+            source_data = article.source.model_dump()
+            source_data.update({
+                "acl_id": None,
+                "venue": _venue_from_name(article.venue_name),
+                "url": f"https://doi.org/{article.doi}" if article.doi else source_data["url"],
+                "pdf_url": None,
+                "license": article.license or "open access",
+            })
+            article = article.model_copy(
+                update={"source": ArticleSource.model_validate(source_data)}
+            )
+            updated_count += 1
+        migrated.append(article.model_dump_json(exclude={"raw_text", "embedding"}))
+
+    _write_jsonl_atomically(articles_path, migrated)
+    log.info("ACL IDs enrichis : %d articles.", updated_count)
+    return updated_count
+
+
+def _write_jsonl_atomically(path: Path, rows: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=path.parent,
+        delete=False,
+    ) as temp:
+        temp.write("".join(f"{row}\n" for row in rows))
+        temp_path = Path(temp.name)
+    temp_path.replace(path)
+
+
+def fetch_openalex_licenses(
+    openalex_ids: list[str],
+    batch_size: int = 50,
+    requester=None,
+) -> dict[str, str | None]:
+    """Récupère uniquement les champs de licence OpenAlex par lots d'IDs."""
+    if not 1 <= batch_size <= 50:
+        raise ValueError("batch_size doit être compris entre 1 et 50")
+    requester = requester or requests.get
+    licenses: dict[str, str | None] = {}
+    for offset in range(0, len(openalex_ids), batch_size):
+        batch = openalex_ids[offset : offset + batch_size]
+        response = requester(
+            f"{OA_BASE}/works",
+            params={
+                "filter": f"openalex_id:{'|'.join(batch)}",
+                "select": "id,best_oa_location,primary_location",
+                "per-page": batch_size,
+                "mailto": OA_EMAIL,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        for work in response.json().get("results", []):
+            openalex_id = (work.get("id") or "").rsplit("/", 1)[-1]
+            locations = (
+                work.get("best_oa_location"),
+                work.get("primary_location"),
+            )
+            licenses[openalex_id] = next(
+                (
+                    str(location["license"])
+                    for location in locations
+                    if location and location.get("license")
+                ),
+                None,
+            )
+        time.sleep(OA_DELAY)
+    return licenses
+
+
+def enrich_licenses(
+    articles_path: Path | None = None,
+    batch_size: int = 50,
+    requester=None,
+) -> dict[str, int]:
+    """Migre la licence OpenAlex des articles existants en conservant leurs IDs."""
+    articles_path = articles_path or config.paths().raw / "articles.jsonl"
+    if not articles_path.exists():
+        raise FileNotFoundError(articles_path)
+    articles = [
+        Article.model_validate_json(line)
+        for line in articles_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    ids = [article.openalex_id for article in articles if article.openalex_id]
+    licenses = fetch_openalex_licenses(ids, batch_size, requester)
+    distribution: Counter[str] = Counter()
+    migrated: list[str] = []
+    for article in articles:
+        license_name = licenses.get(article.openalex_id or "")
+        if article.source.acl_id and not license_name:
+            license_name = "cc-by-4.0"
+        distribution[license_name or "unknown"] += 1
+        migrated.append(
+            article.model_copy(update={"license": license_name})
+            .model_dump_json(exclude={"raw_text", "embedding"})
+        )
+    _write_jsonl_atomically(articles_path, migrated)
+    log.info("Licences enrichies : %s.", dict(distribution))
+    return dict(distribution)
 
 
 def _oa_to_article(work: dict) -> Article | None:
@@ -430,7 +622,15 @@ def main() -> None:
     p.add_argument("--max", type=int, default=1500, help="Nb articles (def: 1500)")
     p.add_argument("--output", type=Path, default=raw_dir, help="Dossier de sortie")
     p.add_argument("--fresh", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--enrich-acl-ids", action="store_true")
+    p.add_argument("--enrich-licenses", action="store_true")
     args = p.parse_args()
+    if args.enrich_acl_ids or args.enrich_licenses:
+        if args.enrich_acl_ids:
+            print(f"ACL IDs enrichis : {enrich_acl_ids()}")
+        if args.enrich_licenses:
+            print(f"Licences : {enrich_licenses()}")
+        return
     n = collect(max_total=args.max, output_dir=args.output, fresh=args.fresh)
     print(f"\nTermine : {n} articles ajoutes.")
 

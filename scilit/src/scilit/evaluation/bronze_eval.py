@@ -1,4 +1,4 @@
-"""SciLit Bronze evaluation -- section 2.3.3 (exactly 3 seeds per component)."""
+"""Legacy pseudo-relevance evaluator; use retrieval_eval for judged metrics."""
 import json
 import logging
 import random

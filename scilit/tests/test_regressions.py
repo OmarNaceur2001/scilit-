@@ -1,17 +1,26 @@
 import json
+import shutil
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from fastapi.testclient import TestClient
+from scilit.corpus import parse as parse_module
 from scilit.corpus.collect import (
+    _acl_id_from_doi,
     _extract_acl_id,
     _extract_arxiv_id,
     _oa_to_article,
     _reconstruct_abstract,
+    enrich_acl_ids,
+    fetch_openalex_licenses,
 )
 from scilit.corpus.index import rrf_fusion
 from scilit.corpus.parse import chunk_text, parse_abstract
 from scilit.extraction.citations import build_citations
 from scilit.extraction.claims import _extract_metric
+from scilit.extraction.intext import (
+    _reconstruct_section_text,
+    extract_intext_citations,
+)
 from scilit.generation.nli_verify import verify_review
 from scilit.generation.template import _bibtex_key, _make_bibtex
 from scilit.schemas import (
@@ -114,6 +123,204 @@ def test_collected_article_id_is_stable_openalex_uuid():
     assert first.referenced_works == ["W44"]
 
 
+def test_acl_doi_migration_preserves_ids_and_sets_source_metadata(tmp_path):
+    article = make_article(22, doi="10.18653/v1/n19-1423")
+    path = tmp_path / "articles.jsonl"
+    path.write_text(article.model_dump_json() + "\n", encoding="utf-8")
+
+    assert _acl_id_from_doi("https://doi.org/10.18653/v1/N19-1423") == "N19-1423"
+    assert enrich_acl_ids(path) == 1
+    migrated = Article.model_validate_json(path.read_text(encoding="utf-8"))
+    assert migrated.id == article.id
+    assert migrated.source.acl_id == "N19-1423"
+    assert migrated.source.venue == Venue.NAACL
+    assert str(migrated.source.url) == "https://aclanthology.org/N19-1423"
+    assert migrated.source.license == "CC BY 4.0"
+
+
+def test_openalex_licenses_fetch_in_batches_and_prefer_best_location():
+    calls = []
+
+    class Response:
+        def __init__(self, params):
+            self.params = params
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            identifier = self.params["filter"].split(":")[1].split("|")[0]
+            return {"results": [{
+                "id": f"https://openalex.org/{identifier}",
+                "best_oa_location": {"license": "cc-by-4.0"},
+                "primary_location": {"license": "cc0"},
+            }]}
+
+    def requester(url, params, timeout):
+        calls.append(params)
+        return Response(params)
+
+    licenses = fetch_openalex_licenses(
+        [f"W{index}" for index in range(51)],
+        requester=requester,
+    )
+    assert len(calls) == 2
+    assert licenses["W0"] == "cc-by-4.0"
+
+
+def test_licensed_fulltext_parse_stops_at_references_and_is_idempotent(
+    tmp_path, monkeypatch
+):
+    import pymupdf as fitz
+
+    pdf_path = tmp_path / "fixture.pdf"
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "1 Introduction", fontsize=16)
+    page.insert_text(
+        (72, 105),
+        "This full text sentence describes the study and its research methods.",
+        fontsize=10,
+    )
+    page.insert_text((72, 140), "2 Method", fontsize=16)
+    page.insert_text(
+        (72, 170),
+        "The method uses a carefully designed benchmark dataset for evaluation.",
+        fontsize=10,
+    )
+    page.insert_text((72, 192), "References 3", fontsize=10)
+    page.insert_text((72, 205), "References", fontsize=16)
+    page.insert_text(
+        (72, 230),
+        "Devlin, Jacob, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. "
+        "2019. BERT: Pre-training of Deep Bidirectional Transformers.",
+        fontsize=10,
+    )
+    document.save(pdf_path)
+    document.close()
+
+    def download(url, destination):
+        shutil.copyfile(pdf_path, destination)
+        return True
+
+    monkeypatch.setattr(parse_module, "_download_pdf", download)
+    article = make_article(80, license="cc-by-4.0", cited_by_count=100)
+    sections_path = tmp_path / "sections.jsonl"
+    chunks_path = tmp_path / "chunks.jsonl"
+
+    section_count, chunk_count = parse_module.run_silver(
+        [article], sections_path=sections_path, chunks_path=chunks_path
+    )
+    sections = parse_module.load_sections(sections_path)
+    assert section_count >= 2 and chunk_count >= 1
+    assert all(section.parse_mode == "fulltext" for section in sections)
+    assert any(section.section_type == SectionType.METHOD for section in sections)
+    assert any(
+        section.section_type == SectionType.METHOD and "References 3" in section.text
+        for section in sections
+    )
+    references = next(
+        section for section in sections
+        if section.section_type == SectionType.REFERENCES
+    )
+    assert "BERT: Pre-training" in references.text
+    assert not any("BERT: Pre-training" in section.text for section in sections
+                   if section.section_type != SectionType.REFERENCES)
+    entries = parse_module._reference_entries([
+        "1. Smith, A. First title. Journal, 2019. "
+        "2. Doe, B. Second title. Journal, 2020.",
+        "Jones, C. Third title. Journal, 2021.",
+    ])
+    assert len(entries) == 3
+    assert entries[0].startswith("1. Smith, A.")
+    assert entries[1].startswith("2. Doe, B.")
+    assert entries[2].startswith("Jones, C.")
+    assert parse_module.run_silver(
+        [article], sections_path=sections_path, chunks_path=chunks_path
+    ) == (0, 0)
+
+
+def test_intext_author_year_narrative_numeric_and_title_linking():
+    citing = make_article(
+        80,
+        referenced_works=["W81"],
+        abstract="A citation extraction fixture abstract.",
+    )
+    target = make_article(
+        81,
+        title="BERT: Pre-training of Deep Bidirectional Transformers",
+        openalex_id="W81",
+        abstract="A target article abstract.",
+    )
+    body = (
+        "Devlin et al. (2019) introduced BERT [1]. "
+        "Earlier results are discussed (Smith, 2020; Lee and Kim, 2021). "
+        "Publication dates include (April 2020) and (ITP 2023)."
+    )
+    body_section = parse_module.Section(
+        id=uuid5(citing.id, "fulltext-body"),
+        article_id=citing.id,
+        section_type=SectionType.INTRODUCTION,
+        title="Introduction",
+        text=body,
+        char_start=0,
+        char_end=len(body),
+        section_index=0,
+        parse_mode="fulltext",
+    )
+    refs = parse_module.Section(
+        id=uuid5(citing.id, "fulltext-refs"),
+        article_id=citing.id,
+        section_type=SectionType.REFERENCES,
+        title="References",
+        text=(
+            "Devlin, Jacob, 2019. BERT: Pre-training of Deep Bidirectional Transformers.\n"
+            "Smith, Jane, 2020. Other research on language models.\n"
+            "Lee, Alex, 2021. A different language research paper."
+        ),
+        char_start=len(body) + 1,
+        char_end=len(body) + 180,
+        section_index=1,
+        parse_mode="fulltext",
+    )
+
+    citations = extract_intext_citations([body_section, refs], [citing, target])
+    assert len(citations) == 4
+    assert len({item.id for item in citations}) == 4
+    assert all(item.reference_linked for item in citations)
+    assert all(
+        item.marker_text not in ("(April 2020)", "(ITP 2023)")
+        for item in citations
+    )
+    assert sum(item.target_article_id == target.id for item in citations) == 2
+    assert all(item.context_window and item.section_type == SectionType.INTRODUCTION
+               for item in citations)
+    truncated_sections = [
+        body_section.model_copy(update={"text": ""}),
+        refs.model_copy(update={"text": ""}),
+    ]
+    citation_chunks = [
+        *chunk_text(
+            body,
+            citing.id,
+            body_section.id,
+            SectionType.INTRODUCTION,
+            parse_mode="fulltext",
+        ),
+        *chunk_text(
+            refs.text,
+            citing.id,
+            refs.id,
+            SectionType.REFERENCES,
+            parse_mode="fulltext",
+        ),
+    ]
+    reconstructed = extract_intext_citations(
+        truncated_sections, [citing, target], citation_chunks
+    )
+    assert [item.id for item in reconstructed] == [item.id for item in citations]
+
+
 def test_abstract_sections_chunks_and_ids_are_deterministic():
     article = make_article(10)
     sections_a, chunks_a = parse_abstract(article)
@@ -151,6 +358,25 @@ def test_chunk_text_respects_overlap_and_repeatable_ids():
     assert [chunk.id for chunk in chunks] == [chunk.id for chunk in repeated]
     assert all(chunk.char_end > chunk.char_start for chunk in chunks)
     assert all(len(chunk.text) >= 30 for chunk in chunks)
+
+
+def test_reconstruct_section_text_aligns_trimmed_chunk_offsets():
+    article = make_article(79)
+    text = "a" * 80 + " " + "b" * 19 + "[12]" + "x" * 220
+    chunks = chunk_text(
+        text,
+        article.id,
+        uuid5(article.id, "section:79"),
+        SectionType.INTRODUCTION,
+        size=100,
+        overlap=20,
+        parse_mode="fulltext",
+    )
+
+    reconstructed = _reconstruct_section_text(chunks)
+
+    assert "[12]" in reconstructed
+    assert reconstructed == text
 
 
 def test_claim_accepts_python_object_name_and_aware_datetime():

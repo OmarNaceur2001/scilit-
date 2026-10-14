@@ -1,10 +1,14 @@
 from uuid import uuid4
+
 import pytest
 from pydantic import ValidationError
 from scilit.schemas import (
-    ComponentMetrics, SeedResult, VerifiedSentence,
-    VerificationStatus, ReviewDraft, Language
+    ComponentMetrics,
+    SeedResult,
+    VerificationStatus,
+    VerifiedSentence,
 )
+
 
 def make_seeds(vals):
     return [SeedResult(seed=s, metric_name="F1", value=v)

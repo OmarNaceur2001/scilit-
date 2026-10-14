@@ -122,14 +122,14 @@ def _make_bibtex(article: dict, bibtex_key: str | None = None) -> BibTeXEntry:
     else:
         entry_type = "article"
     return BibTeXEntry(
-        article_id = UUID(article["id"]),
+        article_id = UUID(str(article["id"])),
         bibtex_key = bibtex_key or _bibtex_key(article),
         entry_type = entry_type,
         title      = article["title"],
         authors    = article["authors"],
         year       = article["year"],
         venue      = venue_name,
-        url        = source.get("url"),
+        url        = str(source["url"]) if source.get("url") else None,
         doi        = article.get("doi") or source.get("doi"),
         booktitle  = venue_name if entry_type == "inproceedings" else None,
         journal    = venue_name if entry_type == "article" else None,
@@ -200,6 +200,7 @@ def _make_vs(
     text:                 str,
     article_ids:          list[str],
     supporting_claim_ids: list[UUID] | None = None,
+    theme_heading:        str | None = None,
 ) -> VerifiedSentence:
     """
     Bronze : toutes les citations restent UNVERIFIABLE.
@@ -210,6 +211,7 @@ def _make_vs(
     statuses = [VerificationStatus.UNVERIFIABLE] * len(uuids)
     return VerifiedSentence(
         text                  = text,
+        theme_heading         = theme_heading,
         citations             = uuids,
         verification_statuses = statuses,
         supporting_claim_ids  = supporting_claim_ids or [],
@@ -272,6 +274,15 @@ def generate(
     ]
 
     # ── 4. Phrases par section ───────────────────────────────────────────────
+    headings_seen: set[str] = set()
+    theme_titles = {
+        "method": "Méthodes",
+        "dataset": "Méthodes",
+        "finding": "Résultats",
+        "hypothesis": "Résultats",
+        "limitation": "Limites",
+        "comparison": "Comparaisons",
+    }
     for ctype in SECTION_ORDER:
         pool = by_type[ctype]
         if not pool:
@@ -291,11 +302,16 @@ def generate(
         for claim in pool[:max_sentences_per_type]:
             article_id = claim.get("article_id")
             support    = [UUID(claim["id"])] if claim.get("id") else []
+            heading = theme_titles.get(ctype)
+            first_heading = heading if heading and heading not in headings_seen else None
+            if heading:
+                headings_seen.add(heading)
             sentences.append(
                 _make_vs(
                     _template_sentence(claim),
                     [article_id] if article_id else [],
                     support,
+                    first_heading,
                 )
             )
 
