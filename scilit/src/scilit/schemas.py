@@ -31,20 +31,20 @@ from __future__ import annotations
 
 import hashlib
 import statistics
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     HttpUrl,
     computed_field,
     field_validator,
     model_validator,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. ENUMS / VOCABULAIRES CONTRÔLÉS
@@ -54,7 +54,7 @@ from pydantic import (
 class Language(str, Enum):
     EN = "en"
     FR = "fr"
-    # Extension prévue : AR = "ar", TN = "tn"
+    AR = "ar"
 
 
 class Venue(str, Enum):
@@ -157,20 +157,33 @@ class ArticleSource(BaseModel):
     """
     Provenance, accès et licence d'un article.
     Lot A collecte ACL Anthology (acl_id) et arXiv (arxiv_id).
-    Au moins un des deux identifiants est obligatoire.
+    Une source publique hors ACL/arXiv peut être identifiée par son URL.
     """
     venue: Venue
     acl_id: str | None = None       # ex. "2023.acl-long.42"
     arxiv_id: str | None = None     # ex. "2304.01234"
+    doi: str | None = None
     url: HttpUrl
     pdf_url: HttpUrl | None = None
     license: str                    # "CC BY 4.0", "ACL anthology open", etc.
-    retrieved_at: datetime = Field(default_factory=datetime.utcnow)
+    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @model_validator(mode="after")
     def at_least_one_id(self) -> ArticleSource:
-        if self.acl_id is None and self.arxiv_id is None:
-            raise ValueError("acl_id ou arxiv_id requis pour la traçabilité")
+        host = self.url.host.lower()
+        has_public_landing_page = not (
+            host == "arxiv.org"
+            or host.endswith(".arxiv.org")
+            or host == "aclanthology.org"
+            or host.endswith(".aclanthology.org")
+        )
+        if (
+            self.acl_id is None
+            and self.arxiv_id is None
+            and self.doi is None
+            and not has_public_landing_page
+        ):
+            raise ValueError("acl_id, arxiv_id, doi ou URL d'accès ouvert requis")
         return self
 
 
@@ -189,6 +202,11 @@ class Article(BaseModel):
     abstract: str
     language: Language = Language.EN
     source: ArticleSource
+    openalex_id: str | None = None
+    doi: str | None = None
+    cited_by_count: int = 0
+    referenced_works: list[str] = Field(default_factory=list)
+    venue_name: str | None = None
     keywords: list[str] = Field(default_factory=list)
     raw_text: str | None = None     # texte brut complet (conservé pour audit)
     split: SplitType = SplitType.TRAIN
@@ -269,6 +287,8 @@ class Claim(BaseModel):
     verbatim : texte source exact conservé pour la vérification NLI aval.
     Les champs metric_value / dataset_name / model_name alimentent ComparativeRow.
     """
+    model_config = ConfigDict(populate_by_name=True)
+
     id: UUID = Field(default_factory=uuid4)
     article_id: UUID
     chunk_id: UUID
@@ -298,9 +318,6 @@ class Claim(BaseModel):
 
     # Embedding exclu de la sérialisation (FAISS)
     embedding: list[float] | None = Field(None, exclude=True)
-
-    class Config:
-        populate_by_name = True
 
 
 class InTextCitation(BaseModel):
@@ -435,7 +452,7 @@ class ComparativeTable(BaseModel):
     """Tableau comparatif complet pour une requête."""
     query_id: UUID
     rows: list[ComparativeRow]
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     llm_model: str
 
 
@@ -500,7 +517,7 @@ class ReviewDraft(BaseModel):
     title: str
     sentences: list[VerifiedSentence]
     language: Language = Language.EN
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     llm_model: str                  # ex. "mistral-7b-instruct-q4_K_M"
     prompt_version: str             # ex. "v3.2" — lié à experiments.md
 
@@ -546,18 +563,50 @@ class BibTeXEntry(BaseModel):
     year: int
     venue: str
     url: str | None = None
+    doi: str | None = None
+    journal: str | None = None
+    booktitle: str | None = None
+    eprint: str | None = None
+    archive_prefix: str | None = None
+    howpublished: str | None = None
 
     def to_bibtex(self) -> str:
-        authors_str = " and ".join(self.authors)
+        def escape(value: str) -> str:
+            replacements = {
+                "\\": r"\textbackslash{}",
+                "&": r"\&",
+                "%": r"\%",
+                "$": r"\$",
+                "#": r"\#",
+                "_": r"\_",
+                "{": r"\{",
+                "}": r"\}",
+                "~": r"\textasciitilde{}",
+                "^": r"\textasciicircum{}",
+            }
+            return "".join(replacements.get(char, char) for char in value)
+
+        authors_str = " and ".join(escape(author) for author in self.authors)
         lines = [
             f"@{self.entry_type}{{{self.bibtex_key},",
-            f"  title     = {{{self.title}}},",
+            f"  title     = {{{escape(self.title)}}},",
             f"  author    = {{{authors_str}}},",
             f"  year      = {{{self.year}}},",
-            f"  booktitle = {{{self.venue}}},",
         ]
+        if self.booktitle:
+            lines.append(f"  booktitle = {{{escape(self.booktitle)}}},")
+        if self.journal:
+            lines.append(f"  journal   = {{{escape(self.journal)}}},")
+        if self.eprint:
+            lines.append(f"  eprint    = {{{escape(self.eprint)}}},")
+        if self.archive_prefix:
+            lines.append(f"  archivePrefix = {{{escape(self.archive_prefix)}}},")
+        if self.howpublished:
+            lines.append(f"  howpublished = {{{escape(self.howpublished)}}},")
+        if self.doi:
+            lines.append(f"  doi       = {{{escape(self.doi)}}},")
         if self.url:
-            lines.append(f"  url       = {{{self.url}}},")
+            lines.append(f"  url       = {{{escape(self.url)}}},")
         lines.append("}")
         return "\n".join(lines)
 
@@ -653,7 +702,7 @@ class ExperimentRecord(BaseModel):
     error_analysis_count doit atteindre ≥ 30 pour le rapport (§ 2.3.4).
     """
     experiment_id: str              # ex. "exp_042_scibert_sections"
-    date: datetime = Field(default_factory=datetime.utcnow)
+    date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     component: str
     hypothesis: str                 # "Pourquoi cette expérience ?"
     config: dict[str, Any]          # lr, batch_size, max_seq_len, ...
@@ -688,7 +737,7 @@ class HallucinationAudit(BaseModel):
     """
     review_id: UUID
     entries: list[HallucinationAuditEntry]
-    audited_at: datetime = Field(default_factory=datetime.utcnow)
+    audited_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @computed_field
     @property
@@ -732,7 +781,7 @@ class SectionAnnotation(BaseModel):
     assigned_type: SectionType
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     is_ambiguous: bool = False
-    annotation_date: datetime = Field(default_factory=datetime.utcnow)
+    annotation_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class CitationFunctionAnnotation(BaseModel):
@@ -745,7 +794,7 @@ class CitationFunctionAnnotation(BaseModel):
     annotator_id: str
     function: CitationFunction
     is_ambiguous: bool = False
-    annotation_date: datetime = Field(default_factory=datetime.utcnow)
+    annotation_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ArticleGridAnnotation(BaseModel):
@@ -763,7 +812,7 @@ class ArticleGridAnnotation(BaseModel):
     limitations: str
     relevant_claim_ids: list[UUID] = Field(default_factory=list)
     kappa_round: int = Field(default=1, ge=1, le=3)
-    annotation_date: datetime = Field(default_factory=datetime.utcnow)
+    annotation_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ReferenceSoTAAnnotation(BaseModel):
@@ -779,7 +828,7 @@ class ReferenceSoTAAnnotation(BaseModel):
     validated_by_teacher: bool = False
     review_text: str
     cited_article_ids: list[UUID]       # articles réellement cités (vérifiables)
-    annotation_date: datetime = Field(default_factory=datetime.utcnow)
+    annotation_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class InterAnnotatorKappa(BaseModel):
@@ -794,7 +843,7 @@ class InterAnnotatorKappa(BaseModel):
     n_items: int
     kappa: float = Field(ge=-1.0, le=1.0)
     agreement_pct: float = Field(ge=0.0, le=1.0)
-    computed_at: datetime = Field(default_factory=datetime.utcnow)
+    computed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     def is_acceptable(self, threshold: float = 0.60) -> bool:
         return self.kappa >= threshold

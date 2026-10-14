@@ -30,23 +30,24 @@ import logging
 import re
 import time
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid5
 
 import requests
 from tqdm import tqdm
 
-from scilit.corpus.collect import ARTICLES_PATH, load_articles
+from scilit import config
+from scilit.corpus.collect import load_articles
 from scilit.schemas import Article, Chunk, Section, SectionType
 
 # =============================================================================
 # CONFIG
 # =============================================================================
 
-PARSED_DIR     = Path("data/parsed")
+PARSED_DIR     = config.PARSED_DIR
 SECTIONS_PATH  = PARSED_DIR / "sections.jsonl"
 CHUNKS_PATH    = PARSED_DIR / "chunks.jsonl"
 LOG_PATH       = PARSED_DIR / "parse_log.txt"
-PDF_CACHE_DIR  = Path("data/raw/pdfs")
+PDF_CACHE_DIR  = config.RAW_DIR / "pdfs"
 
 # Chunking
 CHUNK_SIZE_CHARS    = 1000   # ~250 tokens (estimation : 4 chars/token)
@@ -78,17 +79,6 @@ SECTION_PATTERNS: list[tuple[re.Pattern, SectionType]] = [
 # LOGGING
 # =============================================================================
 
-PARSED_DIR.mkdir(parents=True, exist_ok=True)
-PDF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_PATH, encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
-)
 log = logging.getLogger(__name__)
 
 # =============================================================================
@@ -131,6 +121,7 @@ def chunk_text(
 
         if len(fragment) >= 30:   # ignorer les fragments trop courts
             chunks.append(Chunk(
+                id=uuid5(section_id, f"chunk:{idx}"),
                 article_id=article_id,
                 section_id=section_id,
                 section_type=section_type,
@@ -164,6 +155,7 @@ def parse_abstract(article: Article) -> tuple[list[Section], list[Chunk]]:
         return [], []
 
     section = Section(
+        id=uuid5(article.id, "section:0"),
         article_id=article.id,
         section_type=SectionType.ABSTRACT,
         title="Abstract",
@@ -183,13 +175,19 @@ def parse_abstract(article: Article) -> tuple[list[Section], list[Chunk]]:
 
 def run_bronze(
     articles: list[Article],
-    sections_path: Path = SECTIONS_PATH,
-    chunks_path:   Path = CHUNKS_PATH,
+    sections_path: Path | None = None,
+    chunks_path: Path | None = None,
 ) -> tuple[int, int]:
     """
     Bronze : abstract -> Section + Chunk pour tous les articles.
     Append-safe : relancer sans dupliquer.
     """
+    paths = config.paths()
+    sections_path = sections_path or paths.parsed / "sections.jsonl"
+    chunks_path = chunks_path or paths.parsed / "chunks.jsonl"
+    sections_path.parent.mkdir(parents=True, exist_ok=True)
+    chunks_path.parent.mkdir(parents=True, exist_ok=True)
+
     # Charger les article_ids deja traites
     done_ids: set[str] = set()
     if sections_path.exists():
@@ -334,6 +332,7 @@ def _extract_sections_pymupdf(pdf_path: Path, article: Article) -> list[Section]
         if len(text) < 30:
             return
         sections.append(Section(
+            id=uuid5(article.id, f"section:{section_idx}"),
             article_id=article.id,
             section_type=current_type,
             title=current_title,
@@ -365,6 +364,7 @@ def _extract_sections_pymupdf(pdf_path: Path, article: Article) -> list[Section]
         abstract = article.abstract.strip()
         if abstract:
             sections.append(Section(
+                id=uuid5(article.id, "section:0"),
                 article_id=article.id,
                 section_type=SectionType.ABSTRACT,
                 title="Abstract",
@@ -380,13 +380,18 @@ def _extract_sections_pymupdf(pdf_path: Path, article: Article) -> list[Section]
 def run_silver(
     articles: list[Article],
     max_articles: int = 100,
-    sections_path: Path = SECTIONS_PATH,
-    chunks_path:   Path = CHUNKS_PATH,
+    sections_path: Path | None = None,
+    chunks_path: Path | None = None,
 ) -> tuple[int, int]:
     """
     Silver : telecharge les PDFs et extrait les sections avec PyMuPDF.
     Lance seulement sur max_articles pour eviter de surcharger le disque.
     """
+    paths = config.paths()
+    sections_path = sections_path or paths.parsed / "sections.jsonl"
+    chunks_path = chunks_path or paths.parsed / "chunks.jsonl"
+    sections_path.parent.mkdir(parents=True, exist_ok=True)
+    chunks_path.parent.mkdir(parents=True, exist_ok=True)
     log.info(f"Silver : traitement de {min(max_articles, len(articles))} articles...")
     total_s = total_c = downloaded = failed = 0
 
@@ -404,7 +409,8 @@ def run_silver(
                 sections, chunks = parse_abstract(article)
             else:
                 safe_name = article.corpus_id + ".pdf"
-                pdf_path  = PDF_CACHE_DIR / safe_name
+                pdf_path = paths.raw / "pdfs" / safe_name
+                pdf_path.parent.mkdir(parents=True, exist_ok=True)
 
                 ok = _download_pdf(pdf_url, pdf_path)
                 if ok:
@@ -442,8 +448,9 @@ def run_silver(
 # UTILITAIRES DE LECTURE
 # =============================================================================
 
-def load_sections(path: Path = SECTIONS_PATH) -> list[Section]:
+def load_sections(path: Path | None = None) -> list[Section]:
     """Charge toutes les Sections depuis sections.jsonl."""
+    path = path or config.paths().parsed / "sections.jsonl"
     items = []
     if not path.exists():
         return items
@@ -459,8 +466,9 @@ def load_sections(path: Path = SECTIONS_PATH) -> list[Section]:
     return items
 
 
-def load_chunks(path: Path = CHUNKS_PATH) -> list[Chunk]:
+def load_chunks(path: Path | None = None) -> list[Chunk]:
     """Charge tous les Chunks depuis chunks.jsonl."""
+    path = path or config.paths().parsed / "chunks.jsonl"
     items = []
     if not path.exists():
         return items
@@ -503,6 +511,8 @@ def print_stats(sections_path: Path, chunks_path: Path) -> None:
 # =============================================================================
 
 def main() -> None:
+    paths = config.paths()
+    config.setup_logging(paths.parsed / "parse_log.txt")
     p = argparse.ArgumentParser(description="SciLit -- parsing articles")
     p.add_argument(
         "--mode",
@@ -519,8 +529,8 @@ def main() -> None:
     p.add_argument(
         "--input",
         type=Path,
-        default=ARTICLES_PATH,
-        help=f"Chemin vers articles.jsonl (default: {ARTICLES_PATH})",
+        default=None,
+        help=f"Chemin vers articles.jsonl (default: {paths.raw / 'articles.jsonl'})",
     )
     args = p.parse_args()
 
@@ -540,7 +550,7 @@ def main() -> None:
         ns, nc = run_silver(articles, max_articles=args.max or len(articles))
 
     log.info(f"Sections sauvegardees : {ns} | Chunks : {nc}")
-    print_stats(SECTIONS_PATH, CHUNKS_PATH)
+    print_stats(paths.parsed / "sections.jsonl", paths.parsed / "chunks.jsonl")
 
 if __name__ == "__main__":
     main()

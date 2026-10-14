@@ -1,0 +1,5 @@
+2026-10-14 13:11:15,452 | INFO | 1500 articles charges.
+2026-10-14 13:11:15,452 | INFO | Mode : abstract | Articles : 1500
+2026-10-14 13:11:15,506 | INFO | Sections sauvegardees : 1500 | Chunks : 4062
+2026-10-14 13:11:15,527 | INFO | 1500 sections chargees.
+2026-10-14 13:11:15,546 | INFO | 4062 chunks charges.

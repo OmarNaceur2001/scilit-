@@ -31,18 +31,19 @@ import json
 import logging
 import re
 from pathlib import Path
-from uuid import UUID
+from uuid import uuid5
 
 from tqdm import tqdm
 
-from scilit.corpus.parse import CHUNKS_PATH, load_chunks
-from scilit.schemas import Chunk, Claim, ClaimType, HedgingLevel, SectionType
+from scilit import config
+from scilit.corpus.parse import load_chunks
+from scilit.schemas import Chunk, Claim, ClaimType, HedgingLevel
 
 # =============================================================================
 # CONFIG
 # =============================================================================
 
-PARSED_DIR   = Path("data/parsed")
+PARSED_DIR   = config.PARSED_DIR
 CLAIMS_PATH  = PARSED_DIR / "claims.jsonl"
 LOG_PATH     = PARSED_DIR / "claims_log.txt"
 
@@ -53,15 +54,6 @@ BATCH_SIZE   = 64    # chunks par batch pour nlp.pipe()
 # LOGGING
 # =============================================================================
 
-PARSED_DIR.mkdir(parents=True, exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_PATH, encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
-)
 log = logging.getLogger(__name__)
 
 # =============================================================================
@@ -387,9 +379,9 @@ def extract_claims_from_chunk(chunk: Chunk, nlp) -> list[Claim]:
 
         # Offset dans le chunk
         char_start = sent.start_char
-        char_end   = sent.end_char
 
         claims.append(Claim(
+            id=uuid5(chunk.id, f"claim:{char_start}"),
             article_id=chunk.article_id,
             chunk_id=chunk.id,
             section_type=chunk.section_type,
@@ -413,12 +405,14 @@ def extract_claims_from_chunk(chunk: Chunk, nlp) -> list[Claim]:
 def extract_claims(
     chunks: list[Chunk],
     max_chunks: int | None = None,
-    output_path: Path = CLAIMS_PATH,
+    output_path: Path | None = None,
 ) -> int:
     """
     Pipeline principal : Chunk[] -> Claim[] sauvegardes dans claims.jsonl.
     Append-safe. Utilise nlp.pipe() pour le batch processing spaCy.
     """
+    output_path = output_path or config.paths().parsed / "claims.jsonl"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     nlp = _load_spacy()
     # Desactiver les composants inutiles (ner et lemmatizer suffisent)
     # Garder : tok2vec, tagger, parser, lemmatizer
@@ -488,8 +482,10 @@ def _extract_claims_from_doc(chunk: Chunk, doc) -> list[Claim]:
         metric_name, metric_val = _extract_metric(text)
         dataset_name = _extract_dataset(text)
         model_name   = _extract_model(text)
+        char_start = sent.start_char
 
         claims.append(Claim(
+            id=uuid5(chunk.id, f"claim:{char_start}"),
             article_id=chunk.article_id,
             chunk_id=chunk.id,
             section_type=chunk.section_type,
@@ -513,8 +509,9 @@ def _extract_claims_from_doc(chunk: Chunk, doc) -> list[Claim]:
 # CHARGEMENT
 # =============================================================================
 
-def load_claims(path: Path = CLAIMS_PATH) -> list[Claim]:
+def load_claims(path: Path | None = None) -> list[Claim]:
     """Charge tous les Claims depuis claims.jsonl."""
+    path = path or config.paths().parsed / "claims.jsonl"
     items = []
     if not path.exists():
         return items
@@ -577,9 +574,10 @@ def print_stats(claims: list[Claim]) -> None:
 # =============================================================================
 
 def main() -> None:
+    config.setup_logging(config.paths().parsed / "claims_log.txt")
     p = argparse.ArgumentParser(description="SciLit -- extraction claims (Bronze)")
     p.add_argument("--max",   type=int,  default=None, help="Nb max de chunks")
-    p.add_argument("--input", type=Path, default=CHUNKS_PATH)
+    p.add_argument("--input", type=Path, default=None)
     p.add_argument("--stats", action="store_true", help="Afficher stats apres extraction")
     args = p.parse_args()
 

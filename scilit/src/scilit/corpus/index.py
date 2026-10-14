@@ -31,20 +31,22 @@ import json
 import logging
 import pickle
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 from tqdm import tqdm
 
-from scilit.corpus.parse import CHUNKS_PATH, load_chunks
-from scilit.schemas import BM25Result, Chunk, DenseResult, RankedResult
+from scilit import config
+from scilit.corpus.parse import load_chunks
+from scilit.schemas import BM25Result, Chunk, DenseResult, RankedResult, SectionType
 
 # =============================================================================
 # CONFIG
 # =============================================================================
 
-PARSED_DIR   = Path("data/parsed")
+PARSED_DIR   = config.PARSED_DIR
 LOG_PATH     = PARSED_DIR / "index_log.txt"
 
 # BM25
@@ -80,15 +82,6 @@ STOP_WORDS = {
 # LOGGING
 # =============================================================================
 
-PARSED_DIR.mkdir(parents=True, exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_PATH, encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
-)
 log = logging.getLogger(__name__)
 
 # =============================================================================
@@ -111,40 +104,6 @@ def tokenize(text: str, remove_stop: bool = True) -> list[str]:
 # =============================================================================
 # BM25 BRONZE
 # =============================================================================
-
-class BM25Index:
-    """
-    Encapsule le BM25Okapi avec les metadonnees de chunks.
-    Permet search(query, k) -> list[BM25Result] sans reimporter les chunks.
-    """
-
-    def __init__(self, model: Any, chunk_ids: list[str], chunk_texts: list[str]) -> None:
-        self._model      = model
-        self._chunk_ids  = chunk_ids
-        self._chunk_texts = chunk_texts
-
-    def search(self, query: str, k: int = 10) -> list[BM25Result]:
-        tokens = tokenize(query)
-        if not tokens:
-            return []
-        scores = self._model.get_scores(tokens)
-        # Tri decroissant, top-k
-        ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)[:k]
-        results = []
-        for rank, (idx, score) in enumerate(ranked, start=1):
-            if score <= 0:
-                break
-            cid = self._chunk_ids[idx]
-            # article_id est le prefixe du chunk_id dans notre schema
-            # Le chunk_id est un UUID, l'article_id est stocke dans la meta
-            results.append(BM25Result(
-                chunk_id=UUID(cid),
-                article_id=UUID(self._chunk_ids[idx]),  # placeholder, remplace par meta
-                score=float(score),
-                rank=rank,
-            ))
-        return results
-
 
 class BM25IndexFull:
     """
@@ -179,7 +138,12 @@ class BM25IndexFull:
             ))
         return results
 
-    def save(self, index_path: Path = BM25_INDEX_PATH, meta_path: Path = BM25_META_PATH) -> None:
+    def save(self, index_path: Path | None = None, meta_path: Path | None = None) -> None:
+        paths = config.paths().parsed
+        index_path = index_path or paths / "bm25_index.pkl"
+        meta_path = meta_path or paths / "bm25_meta.json"
+        index_path.parent.mkdir(parents=True, exist_ok=True)
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
         with open(index_path, "wb") as f:
             pickle.dump(self._model, f)
         with open(meta_path, "w", encoding="utf-8") as f:
@@ -189,12 +153,15 @@ class BM25IndexFull:
     @classmethod
     def load(
         cls,
-        index_path: Path = BM25_INDEX_PATH,
-        meta_path:  Path = BM25_META_PATH,
+        index_path: Path | None = None,
+        meta_path:  Path | None = None,
     ) -> BM25IndexFull:
+        paths = config.paths().parsed
+        index_path = index_path or paths / "bm25_index.pkl"
+        meta_path = meta_path or paths / "bm25_meta.json"
         with open(index_path, "rb") as f:
             model = pickle.load(f)
-        with open(meta_path, "r", encoding="utf-8") as f:
+        with open(meta_path, encoding="utf-8") as f:
             meta = json.load(f)
         log.info(f"BM25 charge : {len(meta)} chunks.")
         return cls(model, meta)
@@ -202,8 +169,8 @@ class BM25IndexFull:
 
 def build_bm25(
     chunks: list[Chunk],
-    index_path: Path = BM25_INDEX_PATH,
-    meta_path:  Path = BM25_META_PATH,
+    index_path: Path | None = None,
+    meta_path:  Path | None = None,
 ) -> BM25IndexFull:
     """
     Construit et sauvegarde l'index BM25Okapi.
@@ -214,6 +181,9 @@ def build_bm25(
     except ImportError:
         raise ImportError("pip install rank-bm25")
 
+    paths = config.paths().parsed
+    index_path = index_path or paths / "bm25_index.pkl"
+    meta_path = meta_path or paths / "bm25_meta.json"
     log.info(f"BM25 : tokenisation de {len(chunks)} chunks...")
     corpus_tokens: list[list[str]] = []
     meta: list[dict] = []
@@ -261,14 +231,7 @@ class DenseIndex:
         self._dim        = dim
 
     def search(self, query: str, k: int = 10) -> list[DenseResult]:
-        try:
-            from sentence_transformers import SentenceTransformer
-            import numpy as np
-            import faiss
-        except ImportError:
-            raise ImportError("pip install sentence-transformers faiss-cpu")
-
-        model  = SentenceTransformer(self._model_name)
+        model = _load_sentence_transformer(self._model_name)
         q_emb  = model.encode([query], normalize_embeddings=True).astype("float32")
         scores, indices = self._index.search(q_emb, k)
 
@@ -287,25 +250,33 @@ class DenseIndex:
 
     def save(
         self,
-        index_path: Path = FAISS_INDEX_PATH,
-        meta_path:  Path = FAISS_META_PATH,
+        index_path: Path | None = None,
+        meta_path:  Path | None = None,
     ) -> None:
         import faiss
+        paths = config.paths().parsed
+        index_path = index_path or paths / "faiss_index.bin"
+        meta_path = meta_path or paths / "faiss_meta.json"
+        index_path.parent.mkdir(parents=True, exist_ok=True)
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
         faiss.write_index(self._index, str(index_path))
-        config = {"model": self._model_name, "dim": self._dim, "n": len(self._meta)}
+        index_config = {"model": self._model_name, "dim": self._dim, "n": len(self._meta)}
         with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump({"config": config, "meta": self._meta}, f, ensure_ascii=False)
+            json.dump({"config": index_config, "meta": self._meta}, f, ensure_ascii=False)
         log.info(f"FAISS sauvegarde : {index_path} ({len(self._meta)} vecteurs)")
 
     @classmethod
     def load(
         cls,
-        index_path: Path = FAISS_INDEX_PATH,
-        meta_path:  Path = FAISS_META_PATH,
+        index_path: Path | None = None,
+        meta_path:  Path | None = None,
     ) -> DenseIndex:
         import faiss
+        paths = config.paths().parsed
+        index_path = index_path or paths / "faiss_index.bin"
+        meta_path = meta_path or paths / "faiss_meta.json"
         fi = faiss.read_index(str(index_path))
-        with open(meta_path, "r", encoding="utf-8") as f:
+        with open(meta_path, encoding="utf-8") as f:
             data = json.load(f)
         cfg  = data["config"]
         meta = data["meta"]
@@ -313,26 +284,34 @@ class DenseIndex:
         return cls(fi, meta, cfg["model"], cfg["dim"])
 
 
+@lru_cache(maxsize=4)
+def _load_sentence_transformer(model_name: str):
+    from sentence_transformers import SentenceTransformer
+    return SentenceTransformer(model_name)
+
+
 def build_dense(
     chunks: list[Chunk],
     model_name: str = MODEL_BRONZE,
     batch_size: int = 64,
-    index_path: Path = FAISS_INDEX_PATH,
-    meta_path:  Path = FAISS_META_PATH,
+    index_path: Path | None = None,
+    meta_path:  Path | None = None,
 ) -> DenseIndex:
     """
     Encode tous les chunks avec sentence-transformers et construit FAISS FlatIP.
     Normalisation L2 avant indexation -> produit scalaire = cosine similarity.
     """
     try:
-        from sentence_transformers import SentenceTransformer
-        import numpy as np
         import faiss
+        import numpy as np
     except ImportError:
         raise ImportError("pip install sentence-transformers faiss-cpu")
 
+    paths = config.paths().parsed
+    index_path = index_path or paths / "faiss_index.bin"
+    meta_path = meta_path or paths / "faiss_meta.json"
     log.info(f"Dense : chargement du modele {model_name}...")
-    model = SentenceTransformer(model_name)
+    model = _load_sentence_transformer(model_name)
     dim   = model.get_sentence_embedding_dimension()
     log.info(f"  Dimension : {dim}")
 
@@ -400,7 +379,7 @@ def rrf_fusion(
         chunk_to_article[cid]   = str(r.article_id)
         rrf_scores[cid]         = rrf_scores.get(cid, 0.0) + 1.0 / (k + r.rank)
 
-    sorted_chunks = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
+    sorted_chunks = sorted(rrf_scores.items(), key=lambda x: (-x[1], x[0]))
 
     # Charger les textes si besoin (depuis meta BM25)
     results: list[RankedResult] = []
@@ -409,7 +388,7 @@ def rrf_fusion(
             query_id=UUID(int=0),           # placeholder -- a remplir par l'appelant
             chunk_id=UUID(cid),
             article_id=UUID(chunk_to_article[cid]),
-            section_type=__import__("scilit.schemas", fromlist=["SectionType"]).SectionType.OTHER,
+            section_type=SectionType.OTHER,
             chunk_text="",                  # a remplir via lookup si besoin
             bm25_rank=bm25_rank_map.get(cid),
             dense_rank=dense_rank_map.get(cid),
@@ -428,7 +407,7 @@ def print_bm25_stats(index: BM25IndexFull) -> None:
     print(f"\n{'='*55}")
     print(f"  BM25 INDEX : {n} chunks indexes")
     print(f"  Tokens moyens/chunk : {avg_tokens:.0f}")
-    print(f"  Index sauvegarde dans : {BM25_INDEX_PATH}")
+    print(f"  Index sauvegarde dans : {config.paths().parsed / 'bm25_index.pkl'}")
     print(f"{'='*55}\n")
 
 # =============================================================================
@@ -436,6 +415,7 @@ def print_bm25_stats(index: BM25IndexFull) -> None:
 # =============================================================================
 
 def main() -> None:
+    config.setup_logging(config.paths().parsed / "index_log.txt")
     p = argparse.ArgumentParser(description="SciLit -- construction index")
     p.add_argument(
         "--mode",

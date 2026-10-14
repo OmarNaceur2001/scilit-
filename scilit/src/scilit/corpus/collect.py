@@ -15,26 +15,27 @@ Usage :
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import logging
+import re
 import time
+from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
-from typing import Generator
+from uuid import NAMESPACE_URL, uuid5
 
 import requests
-from pydantic import ValidationError
 from tqdm import tqdm
 
+from scilit import config
 from scilit.schemas import Article, ArticleSource, Language, SplitType, Venue
 
 # =============================================================================
 # CONFIG
 # =============================================================================
 
-YEAR_MIN = 2021
-YEAR_MAX = 2026
+YEAR_MIN = 2019
+YEAR_MAX = 2025
 
 OA_BASE   = "https://api.openalex.org"
 OA_EMAIL  = "omar.naceur01@gmail.com"   # polite pool = pas de limite stricte
@@ -42,33 +43,15 @@ OA_PER_PAGE = 200
 OA_DELAY    = 0.15                      # ~6-7 req/s (limite = 10/s)
 
 # Concept OpenAlex : Natural Language Processing
-OA_CONCEPT_NLP = "C41008148"
+OA_CONCEPT_NLP = "C204321447"
 
 # Champs a recuperer (evite de telecharger tout l'objet)
 OA_SELECT = ",".join([
     "id", "title", "authorships", "publication_year",
-    "abstract_inverted_index", "primary_location",
-    "open_access", "ids", "locations",
+    "abstract_inverted_index", "primary_location", "open_access", "ids",
+    "locations", "doi", "cited_by_count", "referenced_works",
 ])
 
-RAW_DIR       = Path("data/raw")
-MANIFEST_PATH = RAW_DIR / "manifest.json"
-ARTICLES_PATH = RAW_DIR / "articles.jsonl"
-LOG_PATH      = RAW_DIR / "collect_log.txt"
-
-# =============================================================================
-# LOGGING
-# =============================================================================
-
-RAW_DIR.mkdir(parents=True, exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_PATH, encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
-)
 log = logging.getLogger(__name__)
 
 # =============================================================================
@@ -76,12 +59,12 @@ log = logging.getLogger(__name__)
 # =============================================================================
 
 class Manifest:
-    def __init__(self, path: Path = MANIFEST_PATH) -> None:
-        self.path = path
+    def __init__(self, path: Path | None = None) -> None:
+        self.path = path or config.paths().raw / "manifest.json"
         self.seen: set[str] = set()
-        if path.exists():
+        if self.path.exists():
             try:
-                data = json.loads(path.read_text("utf-8"))
+                data = json.loads(self.path.read_text("utf-8"))
                 self.seen = set(data.get("ids", []))
                 log.info(f"Manifest : {len(self.seen)} IDs existants.")
             except Exception:
@@ -147,19 +130,30 @@ def _detect_venue(work: dict) -> Venue:
     return Venue.ARXIV
 
 
+def _extract_acl_id(work: dict) -> str | None:
+    for location in work.get("locations", []):
+        url = location.get("landing_page_url") or ""
+        match = re.search(r"aclanthology\.org/(?:[^/?#]+/)?([^/?#]+)", url, re.I)
+        if match:
+            return match.group(1).removesuffix(".pdf")
+    return None
+
+
 def _extract_arxiv_id(work: dict) -> str | None:
     """Extrait l'ID arXiv depuis les locations ou ids."""
-    # IDs directs
+    pattern = re.compile(r"(\d{4}\.\d{4,5})(?:v\d+)?", re.I)
     ids = work.get("ids") or {}
-    if "arxiv" in (ids.get("arxiv") or "").lower():
-        raw = ids["arxiv"].split("/abs/")[-1]
-        return raw.split("v")[0] if raw else None
+    raw_id = ids.get("arxiv") or ""
+    match = pattern.search(raw_id)
+    if match:
+        return match.group(1)
 
-    # Locations
     for loc in work.get("locations", []):
         url = loc.get("landing_page_url") or ""
         if "arxiv.org/abs/" in url:
-            return url.split("/abs/")[-1].split("v")[0]
+            match = pattern.search(url)
+            if match:
+                return match.group(1)
     return None
 
 
@@ -178,22 +172,26 @@ def _oa_to_article(work: dict) -> Article | None:
     # Venue et IDs
     venue     = _detect_venue(work)
     arxiv_id  = _extract_arxiv_id(work)
+    acl_id    = _extract_acl_id(work)
     oa_id     = (work.get("id") or "").replace("https://openalex.org/", "")
 
-    # Au moins un ID externe requis
-    if not arxiv_id and not oa_id:
-        return None
-
-    # URLs
     primary = work.get("primary_location") or {}
+    locations = work.get("locations") or []
     oa_info = work.get("open_access") or {}
     pdf_url = oa_info.get("oa_url") or primary.get("pdf_url")
+    landing_url = primary.get("landing_page_url") or next(
+        (location.get("landing_page_url") for location in locations
+         if location.get("landing_page_url")),
+        None,
+    )
+    if not (acl_id or arxiv_id or pdf_url or landing_url):
+        return None
 
     if arxiv_id:
         base_url = f"https://arxiv.org/abs/{arxiv_id}"
         pdf_url  = pdf_url or f"https://arxiv.org/pdf/{arxiv_id}"
     else:
-        base_url = work.get("id") or f"https://openalex.org/{oa_id}"
+        base_url = landing_url or pdf_url
 
     if not base_url:
         return None
@@ -209,23 +207,43 @@ def _oa_to_article(work: dict) -> Article | None:
 
     try:
         source = ArticleSource(
-            venue=venue,
+            venue=Venue.ACL if acl_id else venue,
             arxiv_id=arxiv_id,
-            acl_id=None,
+            acl_id=acl_id,
+            doi=(work.get("doi") or "").removeprefix("https://doi.org/") or None,
             url=base_url,         # type: ignore[arg-type]
             pdf_url=pdf_url,      # type: ignore[arg-type]
             license="open access",
         )
         return Article(
+            id=uuid5(NAMESPACE_URL, f"https://openalex.org/{oa_id}"),
             title=title,
             authors=authors,
             year=year,
             abstract=abstract,
             language=Language.EN,
             source=source,
+            openalex_id=oa_id or None,
+            doi=(work.get("doi") or "").removeprefix("https://doi.org/") or None,
+            cited_by_count=work.get("cited_by_count") or 0,
+            referenced_works=[
+                ref.rsplit("/", 1)[-1]
+                for ref in work.get("referenced_works", [])
+            ],
+            venue_name=(
+                (primary.get("source") or {}).get("display_name")
+                or next(
+                    (
+                        (location.get("source") or {}).get("display_name")
+                        for location in locations
+                        if (location.get("source") or {}).get("display_name")
+                    ),
+                    None,
+                )
+            ),
             split=SplitType.TRAIN,
         )
-    except (ValidationError, Exception) as e:
+    except Exception as e:
         log.debug(f"OA skip {oa_id}: {e}")
         return None
 
@@ -234,12 +252,12 @@ def _oa_to_article(work: dict) -> Article | None:
 # =============================================================================
 
 def fetch_openalex(
-    max_articles: int = 500,
+    max_articles: int = 1500,
     manifest: Manifest | None = None,
 ) -> Generator[Article, None, None]:
     """
     Collecte via OpenAlex cursor-pagination.
-    Filtre : concept NLP (C41008148), open_access, 2021-2026.
+    Filtre : concept NLP, accès ouvert, 2019-2025.
 
     Performance : ~200 articles/requete, ~1 req/s => 500 articles en ~30 sec.
     """
@@ -263,7 +281,7 @@ def fetch_openalex(
             "per-page": OA_PER_PAGE,
             "cursor":   cursor,
             "mailto":   OA_EMAIL,
-            "sort":     "publication_year:desc",
+            "sort":     "cited_by_count:desc",
         }
 
         try:
@@ -298,12 +316,13 @@ def fetch_openalex(
                 skipped_filter += 1
                 continue
 
-            if manifest and manifest.contains(article.corpus_id):
+            if manifest and manifest.contains(article.openalex_id or ""):
                 skipped_dup += 1
                 continue
 
             if manifest:
-                manifest.add(article.corpus_id)
+                if article.openalex_id:
+                    manifest.add(article.openalex_id)
 
             yield article
             count += 1
@@ -329,12 +348,18 @@ def fetch_openalex(
 # =============================================================================
 
 def collect(
-    max_total: int = 500,
-    output_dir: Path = RAW_DIR,
+    max_total: int = 1500,
+    output_dir: Path | None = None,
+    fresh: bool = True,
 ) -> int:
+    output_dir = output_dir or config.paths().raw
     output_dir.mkdir(parents=True, exist_ok=True)
-    manifest = Manifest(MANIFEST_PATH)
+    manifest_path = output_dir / "manifest.json"
     out_path = output_dir / "articles.jsonl"
+    if fresh:
+        out_path.unlink(missing_ok=True)
+        manifest_path.unlink(missing_ok=True)
+    manifest = Manifest(manifest_path)
 
     log.info(f"=== Collecte OpenAlex : max={max_total} ===")
 
@@ -377,8 +402,9 @@ def _summary(path: Path) -> None:
     print(f"{'='*55}\n")
 
 
-def load_articles(path: Path = ARTICLES_PATH) -> list[Article]:
+def load_articles(path: Path | None = None) -> list[Article]:
     """Charge tous les Article depuis articles.jsonl."""
+    path = path or config.paths().raw / "articles.jsonl"
     arts = []
     if not path.exists():
         return arts
@@ -398,11 +424,14 @@ def load_articles(path: Path = ARTICLES_PATH) -> list[Article]:
 # =============================================================================
 
 def main() -> None:
+    raw_dir = config.paths().raw
+    config.setup_logging(raw_dir / "collect_log.txt")
     p = argparse.ArgumentParser(description="SciLit -- collecte corpus (OpenAlex)")
-    p.add_argument("--max",    type=int,  default=500,   help="Nb articles (def: 500)")
-    p.add_argument("--output", type=Path, default=RAW_DIR, help="Dossier de sortie")
+    p.add_argument("--max", type=int, default=1500, help="Nb articles (def: 1500)")
+    p.add_argument("--output", type=Path, default=raw_dir, help="Dossier de sortie")
+    p.add_argument("--fresh", action=argparse.BooleanOptionalAction, default=True)
     args = p.parse_args()
-    n = collect(max_total=args.max, output_dir=args.output)
+    n = collect(max_total=args.max, output_dir=args.output, fresh=args.fresh)
     print(f"\nTermine : {n} articles ajoutes.")
 
 if __name__ == "__main__":
