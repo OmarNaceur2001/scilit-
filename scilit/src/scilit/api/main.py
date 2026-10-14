@@ -20,12 +20,13 @@ from __future__ import annotations
 import json
 import logging
 from functools import lru_cache
-from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
+
+from scilit import config
 
 log = logging.getLogger(__name__)
 
@@ -36,16 +37,16 @@ log = logging.getLogger(__name__)
 app = FastAPI(
     title        = "SciLit API",
     description  = "Bronze literature-review assistant — ESPRIT NLP 2026-2027",
-    version      = "0.1.0-bronze",
+    version      = "0.2.0",
     docs_url     = "/docs",
     redoc_url    = "/redoc",
 )
 
-PARSED_DIR    = Path("data/parsed")
-RAW_DIR       = Path("data/raw")
-REVIEWS_DIR   = PARSED_DIR / "reviews"
+PARSED_DIR    = config.PARSED_DIR
+RAW_DIR       = config.RAW_DIR
+REVIEWS_DIR   = config.REVIEWS_DIR
 CLAIMS_PATH   = PARSED_DIR / "claims.jsonl"
-ARTICLES_PATH = RAW_DIR    / "articles.jsonl"
+ARTICLES_PATH = RAW_DIR / "articles.jsonl"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -58,22 +59,24 @@ def _get_retrieval():
     return search
 
 
-@lru_cache(maxsize=1)
 def _get_claims() -> list[dict]:
-    if not CLAIMS_PATH.exists():
+    path = config.paths().parsed / "claims.jsonl"
+    if not path.exists():
         return []
     return [
-        json.loads(l)
-        for l in CLAIMS_PATH.read_text(encoding="utf-8").splitlines()
-        if l.strip()
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
     ]
 
 
-@lru_cache(maxsize=1)
 def _get_articles() -> dict[str, dict]:
+    path = config.paths().raw / "articles.jsonl"
+    if not path.exists():
+        return {}
     return {
         a["id"]: a
-        for line in ARTICLES_PATH.read_text(encoding="utf-8").splitlines()
+        for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
         for a in [json.loads(line)]
     }
@@ -141,24 +144,28 @@ class ClaimItem(BaseModel):
 
 @app.get("/", summary="Health check + corpus stats")
 def root():
+    paths = config.paths()
+    articles_path = paths.raw / "articles.jsonl"
+    reviews_dir = paths.reviews
+    parsed_dir = paths.parsed
     n_articles = sum(
-        1 for l in ARTICLES_PATH.read_text(encoding="utf-8").splitlines()
-        if l.strip()
-    ) if ARTICLES_PATH.exists() else 0
+        1 for line in articles_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ) if articles_path.exists() else 0
     n_claims   = len(_get_claims())
     n_reviews  = len([
-        f for f in REVIEWS_DIR.glob("*.json")
+        f for f in reviews_dir.glob("*.json")
         if not f.stem.endswith(("_verified", "_audit"))
-    ]) if REVIEWS_DIR.exists() else 0
+    ]) if reviews_dir.exists() else 0
 
     return {
         "status":     "ok",
-        "version":    "0.1.0-bronze",
+        "version":    "0.2.0",
         "corpus":     {"articles": n_articles, "claims": n_claims},
         "reviews":    n_reviews,
         "index":      {
-            "bm25":  (PARSED_DIR / "bm25_index.pkl").exists(),
-            "faiss": (PARSED_DIR / "faiss_index.bin").exists(),
+            "bm25":  (parsed_dir / "bm25_index.pkl").exists(),
+            "faiss": (parsed_dir / "faiss_index.bin").exists(),
         },
     }
 
@@ -187,13 +194,57 @@ def search(req: SearchRequest):
     return SearchResponse(query=req.query, mode=req.mode, results=results)
 
 
+@app.get("/search", response_model=SearchResponse, summary="Retrieval BM25 / Dense / RRF")
+def search_get(
+    q: str = Query(..., min_length=2),
+    k: int = Query(10, ge=1, le=50),
+    mode: Literal["rrf", "bm25", "dense"] = "rrf",
+):
+    return search(SearchRequest(query=q, k=k, mode=mode))
+
+
+@app.get("/articles/{article_id}", summary="Article metadata and extracted claims")
+def get_article(article_id: str):
+    article = _get_articles().get(article_id)
+    if article is None:
+        raise HTTPException(status_code=404, detail=f"Article '{article_id}' not found.")
+    claims = [claim for claim in _get_claims() if claim.get("article_id") == article_id]
+    return {"article": article, "claims": claims}
+
+
+@app.get(
+    "/export/bibtex",
+    response_class=PlainTextResponse,
+    summary="Export BibTeX for article IDs",
+)
+def export_articles_bibtex(ids: str = Query(..., description="Comma-separated article IDs")):
+    articles = _get_articles()
+    requested_ids = [item.strip() for item in ids.split(",") if item.strip()]
+    missing = [article_id for article_id in requested_ids if article_id not in articles]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Unknown article IDs: {', '.join(missing)}")
+    from scilit.generation.template import _bibtex_key, _make_bibtex
+
+    used_keys: set[str] = set()
+    entries = []
+    for article_id in requested_ids:
+        article = articles[article_id]
+        base_key = _bibtex_key(article)
+        key = base_key
+        suffix = ord("a")
+        while key in used_keys:
+            key = f"{base_key}{chr(suffix)}"
+            suffix += 1
+        used_keys.add(key)
+        entries.append(_make_bibtex(article, key))
+    return "\n\n".join(entry.to_bibtex() for entry in entries)
+
+
 @app.post("/generate", response_model=GenerateResponse, summary="Génération + NLI")
 def generate(req: GenerateRequest):
-    import re
-    import unicodedata
 
-    from scilit.generation.template import generate as gen_fn
     from scilit.generation.template import _slugify
+    from scilit.generation.template import generate as gen_fn
 
     try:
         draft, bibtex = gen_fn(
@@ -209,9 +260,10 @@ def generate(req: GenerateRequest):
     slug = _slugify(req.query)
 
     # ── Sauvegarde template ────────────────────────────────────────────────
-    REVIEWS_DIR.mkdir(parents=True, exist_ok=True)
-    review_path = REVIEWS_DIR / f"{slug}.json"
-    bib_path    = REVIEWS_DIR / f"{slug}.bib"
+    reviews_dir = config.paths().reviews
+    reviews_dir.mkdir(parents=True, exist_ok=True)
+    review_path = reviews_dir / f"{slug}.json"
+    bib_path    = reviews_dir / f"{slug}.bib"
     review_path.write_text(draft.model_dump_json(indent=2), encoding="utf-8")
     bib_path.write_text(
         "\n\n".join(e.to_bibtex() for e in bibtex),
@@ -239,7 +291,7 @@ def generate(req: GenerateRequest):
             )
             _save(updated, audit, slug)
             draft      = updated
-            audit_path = str(REVIEWS_DIR / f"{slug}_audit.json")
+            audit_path = str(reviews_dir / f"{slug}_audit.json")
         except Exception as e:
             log.warning("NLI skipped : %s", e)
 
@@ -258,9 +310,10 @@ def generate(req: GenerateRequest):
 
 @app.get("/review/{slug}", summary="Lire un ReviewDraft sauvegardé")
 def get_review(slug: str):
+    reviews_dir = config.paths().reviews
     # Prefer _verified if it exists
     for suffix in ("_verified", ""):
-        path = REVIEWS_DIR / f"{slug}{suffix}.json"
+        path = reviews_dir / f"{slug}{suffix}.json"
         if path.exists():
             return json.loads(path.read_text(encoding="utf-8"))
     raise HTTPException(status_code=404, detail=f"Review '{slug}' introuvable.")
@@ -272,7 +325,7 @@ def get_review(slug: str):
     summary        = "Télécharger le BibTeX d'une review",
 )
 def export_bibtex(slug: str):
-    path = REVIEWS_DIR / f"{slug}.bib"
+    path = config.paths().reviews / f"{slug}.bib"
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"BibTeX '{slug}' introuvable.")
     return PlainTextResponse(
