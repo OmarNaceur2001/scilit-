@@ -1,207 +1,169 @@
 {
-  "id": "a8d1c4ac-8e36-4829-901e-c77a50f9b11e",
-  "query_id": "4e363979-4271-4e3d-ba7b-8567372ef4dc",
+  "id": "d139681f-f430-4821-a605-14311f287703",
+  "query_id": "934241e6-e576-4d24-8451-84c4a3bd5cc7",
   "title": "Literature Review: Transformer Attention Nlp",
   "sentences": [
     {
-      "text": "This survey covers recent work on transformer attention NLP, drawing from 16 papers.",
-      "citations": [
-        "a35f9617-e6c4-4578-b00d-770fa63a5065",
-        "f6fb9731-083d-4814-81ea-5c3ac425b7ae",
-        "e4f7dec4-3717-4480-a11c-f0e4e8881241"
-      ],
-      "verification_statuses": [
-        "unverifiable",
-        "unverifiable",
-        "unverifiable"
-      ],
+      "text": "This survey covers recent work on transformer attention nlp, drawing from 15 papers.",
+      "citations": [],
+      "verification_statuses": [],
       "supporting_claim_ids": [],
       "nli_score": null,
       "hallucination_rate": 0.0,
       "support_rate": 0.0
     },
     {
-      "text": "To address these challenges, we propose USF-Net, a Unified Spatiotemporal Fusion Network that integrates adaptive large-kernel convolutions and a low-complexity attention mechanism, combining temporal flow information within an encoder-decoder framework.",
+      "text": "We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely.",
       "citations": [
-        "2d85dd52-8fbc-4129-8e8b-f71889a2923e"
+        "8f8686ea-bbc1-56db-8744-329c88a02e37"
       ],
       "verification_statuses": [
         "unverifiable"
       ],
       "supporting_claim_ids": [
-        "6ff896fc-5739-4ae4-b6c8-447f9d7b5d40"
+        "e8de2033-16bb-5b58-a7bb-b9c12dd199c1"
       ],
       "nli_score": null,
       "hallucination_rate": 0.0,
       "support_rate": 0.0
     },
     {
-      "text": "As a key contribution, we also introduce and release the ASI-CIS dataset.",
+      "text": "Most recent analysis has focused on model outputs (e.g., language model surprisal) or internal vector representations (e.g., probing classifiers).Complementary to these works, we propose methods for analyzing the attention mechanisms of pre-trained models and apply them to BERT.BERT's attention heads exhibit patterns such as attending to delimiter tokens, specific positional offsets, or broadly attending over the whole sentence, with heads in the same layer often exhibiting similar behaviors.",
       "citations": [
-        "2d85dd52-8fbc-4129-8e8b-f71889a2923e"
+        "5786404d-077c-5aa6-809c-60e0376179dc"
       ],
       "verification_statuses": [
         "unverifiable"
       ],
       "supporting_claim_ids": [
-        "ed1c5ea3-44e1-4473-9aed-49f8abb77f2c"
+        "fb65228e-323b-5054-a02f-6465a6fb740f"
       ],
       "nli_score": null,
       "hallucination_rate": 0.0,
       "support_rate": 0.0
     },
     {
-      "text": "Here we introduce a content analysis tool, Language-Grounded Sparse Encoders (LanSE), which decomposes images into interpretable visual patterns with natural language descriptions.",
+      "text": "We propose a taxonomy of attention models according to four dimensions: the representation of the input, the compatibility function, the distribution function, and the multiplicity of the input and/or output.",
       "citations": [
-        "864da1c0-5fd2-4097-8ed0-92cc9b9cc3a6"
+        "d6971e48-ce6a-5ffa-8c52-4057044c6555"
       ],
       "verification_statuses": [
         "unverifiable"
       ],
       "supporting_claim_ids": [
-        "66df680e-d31f-4781-a01f-5df5d318887e"
+        "2d5899a5-cdda-5f53-bf5d-e4ab94e93342"
       ],
       "nli_score": null,
       "hallucination_rate": 0.0,
       "support_rate": 0.0
     },
     {
-      "text": "Our method discovers >5000 visual patterns with 93% human agreement, provides decomposed evaluation that outperforms existing methods, establishes the first systematic evaluation of physical plausib.",
+      "text": "Our model achieves 41.8 BLEU.",
       "citations": [
-        "864da1c0-5fd2-4097-8ed0-92cc9b9cc3a6"
+        "8f8686ea-bbc1-56db-8744-329c88a02e37"
       ],
       "verification_statuses": [
         "unverifiable"
       ],
       "supporting_claim_ids": [
-        "0bb97d8c-d173-40cb-a51a-8bc275409cb9"
+        "ba967108-ab25-57f3-a3b0-6022f88d33ab"
       ],
       "nli_score": null,
       "hallucination_rate": 0.0,
       "support_rate": 0.0
     },
     {
-      "text": "Across three VLMs, RotationCue improves every model--task combination on OR-Bench, raising macro-average accuracy by 7.9--12.6 points while preserving general capabilities.",
+      "text": "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks in an encoder-decoder configuration.",
       "citations": [
-        "f6fb9731-083d-4814-81ea-5c3ac425b7ae"
+        "8f8686ea-bbc1-56db-8744-329c88a02e37"
       ],
       "verification_statuses": [
         "unverifiable"
       ],
       "supporting_claim_ids": [
-        "26a9393b-0ca7-4fd9-85bb-83739e6a3457"
+        "38d29487-f8bf-5790-8c79-c161699b4935"
       ],
       "nli_score": null,
       "hallucination_rate": 0.0,
       "support_rate": 0.0
     },
     {
-      "text": "Separately, computing the softmax backward correction from BF16-rounded forward outputs loses numerical precision.",
+      "text": "The best performing models also connect the encoder and decoder through an attention mechanism.",
       "citations": [
-        "62ab94e6-4f94-4f60-bb59-aebffbce2e53"
+        "8f8686ea-bbc1-56db-8744-329c88a02e37"
       ],
       "verification_statuses": [
         "unverifiable"
       ],
       "supporting_claim_ids": [
-        "f50ba8c2-4514-450c-9358-53168d18b17f"
+        "01f084c9-9d0b-58a7-9d6d-b8d7e9216965"
       ],
       "nli_score": null,
       "hallucination_rate": 0.0,
       "support_rate": 0.0
     },
     {
-      "text": "Rambour et al. introduced the SEN12-FLOOD dataset and extracted per-image features using a ResNet-50 convolutional neural network backbone, then fed these features into a gated recurrent unit network to show that temporal information can substantially improve accuracy compared to single-image baselines.",
+      "text": "We show that well configured Transformer models outperform our baseline models based on the shallow stack of LSTM recurrent neural network layers.",
       "citations": [
-        "a37c84d2-b2ed-4e31-928c-e73f290372c9"
+        "7d5b0df1-2f41-54ff-909b-f06c4a4c453d"
       ],
       "verification_statuses": [
         "unverifiable"
       ],
       "supporting_claim_ids": [
-        "af5bdd33-d86e-40ba-8d58-4a37d46c8da9"
+        "e677a5ad-1a1d-5c36-8c8a-a5b2a673902f"
       ],
       "nli_score": null,
       "hallucination_rate": 0.0,
       "support_rate": 0.0
     },
     {
-      "text": "We analyze 319 real-world Python and Java bugs from SWE-bench Verified and Multi-SWE-bench to study (RQ1) how model attention is distributed across bug report sections, (RQ2) how attention patterns within each section differ between successful and unsuccessful repairs, and (RQ3) how these patterns compare to informati.",
+      "text": "A noted limitation: In this work, we address the challenging task of referring segmentation.",
       "citations": [
-        "e4f7dec4-3717-4480-a11c-f0e4e8881241"
+        "42491378-1f5b-5cd5-a3e6-4bc72a8084ab"
       ],
       "verification_statuses": [
         "unverifiable"
       ],
       "supporting_claim_ids": [
-        "9c6b7b31-66d6-4990-bba8-64da48053f67"
+        "e480f162-c213-52b5-bc96-5cfa1efb2333"
       ],
       "nli_score": null,
       "hallucination_rate": 0.0,
       "support_rate": 0.0
     },
     {
-      "text": "Ention is distributed across bug report sections, (RQ2) how attention patterns within each section differ between successful and unsuccessful repairs, and (RQ3) how these patterns compare to information developers consider important for bug fixing.",
+      "text": "A noted limitation: Second, we show that deep Transformer language models do not require positional encoding.",
       "citations": [
-        "e4f7dec4-3717-4480-a11c-f0e4e8881241"
+        "7d5b0df1-2f41-54ff-909b-f06c4a4c453d"
       ],
       "verification_statuses": [
         "unverifiable"
       ],
       "supporting_claim_ids": [
-        "045e0761-9627-4fd0-933c-3de9d8e51ba7"
+        "15eeb44e-b6f2-59c2-bf53-9dc11f00bdfb"
       ],
       "nli_score": null,
       "hallucination_rate": 0.0,
       "support_rate": 0.0
     },
     {
-      "text": "A noted limitation: The expanding availability of satellite data and advances in artificial intelligence have enhanced monitoring of environmental hazards, but many flood events remain challenging to detect because cloud cover obscures optical satellite imagery.",
+      "text": "A noted limitation: that deep Transformer language models do not require positional encoding.",
       "citations": [
-        "a37c84d2-b2ed-4e31-928c-e73f290372c9"
+        "7d5b0df1-2f41-54ff-909b-f06c4a4c453d"
       ],
       "verification_statuses": [
         "unverifiable"
       ],
       "supporting_claim_ids": [
-        "b2cde469-64ce-457f-8540-160398eef9e6"
+        "8a349b31-5a10-505a-94ed-19f44bc3fcc6"
       ],
       "nli_score": null,
       "hallucination_rate": 0.0,
       "support_rate": 0.0
     },
     {
-      "text": "A noted limitation: However, these models typically function as opaque black boxes, making it difficult to interpret their decision boundaries, learned features, a.",
-      "citations": [
-        "a37c84d2-b2ed-4e31-928c-e73f290372c9"
-      ],
-      "verification_statuses": [
-        "unverifiable"
-      ],
-      "supporting_claim_ids": [
-        "8d61f297-f41c-4750-9495-0423d31e7db4"
-      ],
-      "nli_score": null,
-      "hallucination_rate": 0.0,
-      "support_rate": 0.0
-    },
-    {
-      "text": "A noted limitation: Even when provided with the same contextual information, an LLM may generate a correct patch for one bug but fail on another closely related bug.",
-      "citations": [
-        "e4f7dec4-3717-4480-a11c-f0e4e8881241"
-      ],
-      "verification_statuses": [
-        "unverifiable"
-      ],
-      "supporting_claim_ids": [
-        "6b4c2019-525e-45b2-bdf8-577216c42e17"
-      ],
-      "nli_score": null,
-      "hallucination_rate": 0.0,
-      "support_rate": 0.0
-    },
-    {
-      "text": "In summary, 16 methodological contributions and 83 empirical findings were identified in the literature on transformer attention NLP.",
+      "text": "In summary, 14 methodological contributions and 78 empirical findings were identified in the literature on transformer attention nlp.",
       "citations": [],
       "verification_statuses": [],
       "supporting_claim_ids": [],
@@ -211,7 +173,7 @@
     }
   ],
   "language": "en",
-  "generated_at": "2026-10-11T10:12:40.933298",
+  "generated_at": "2026-10-14T13:14:50.507482Z",
   "llm_model": "template-bronze-v1",
   "prompt_version": "v1.0-bronze",
   "overall_hallucination_rate": 0.0,

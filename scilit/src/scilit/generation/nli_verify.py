@@ -28,11 +28,10 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
-from pathlib import Path
-from uuid import UUID
 
 from tqdm import tqdm
 
+from scilit import config
 from scilit.schemas import (
     HallucinationAudit,
     HallucinationAuditEntry,
@@ -43,9 +42,9 @@ from scilit.schemas import (
 
 log = logging.getLogger(__name__)
 
-REVIEWS_DIR   = Path("data/parsed/reviews")
-CLAIMS_PATH   = Path("data/parsed/claims.jsonl")
-ARTICLES_PATH = Path("data/raw/articles.jsonl")
+REVIEWS_DIR   = config.REVIEWS_DIR
+CLAIMS_PATH   = config.PARSED_DIR / "claims.jsonl"
+ARTICLES_PATH = config.RAW_DIR / "articles.jsonl"
 
 NLI_MODEL        = "cross-encoder/nli-deberta-v3-small"
 ENTAIL_THRESHOLD = 0.50
@@ -57,29 +56,44 @@ MAX_PREMISES     = 3    # max claims testés par phrase (vitesse CPU)
 # Loaders
 # ─────────────────────────────────────────────────────────────
 
-def _load_claims_lookup() -> dict[str, str]:
+def _load_claims_lookup() -> dict[str, dict]:
     """claim_uuid_str → claim text (champ 'text')."""
-    lookup: dict[str, str] = {}
-    for line in CLAIMS_PATH.read_text(encoding="utf-8").splitlines():
+    path = config.paths().parsed / "claims.jsonl"
+    lookup: dict[str, dict] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         c = json.loads(line)
         cid  = c.get("id")
         text = c.get("text")
         if cid and text:
-            lookup[str(cid)] = text
+            lookup[str(cid)] = c
     log.info("Claims lookup : %d entrées.", len(lookup))
     return lookup
 
 
 def _load_articles_lookup() -> dict[str, dict]:
     """article_uuid_str → article dict."""
+    path = config.paths().raw / "articles.jsonl"
     return {
         a["id"]: a
-        for line in ARTICLES_PATH.read_text(encoding="utf-8").splitlines()
+        for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
         for a in [json.loads(line)]
     }
+
+
+def _load_chunks_lookup() -> dict[str, list[str]]:
+    path = config.paths().parsed / "chunks.jsonl"
+    lookup: dict[str, list[str]] = {}
+    if not path.exists():
+        return lookup
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        chunk = json.loads(line)
+        lookup.setdefault(str(chunk.get("article_id")), []).append(chunk.get("text", ""))
+    return lookup
 
 
 def _bibtex_key(article: dict) -> str:
@@ -89,7 +103,7 @@ def _bibtex_key(article: dict) -> str:
 
 
 def _load_review(slug: str) -> ReviewDraft:
-    path = REVIEWS_DIR / f"{slug}.json"
+    path = config.paths().reviews / f"{slug}.json"
     if not path.exists():
         raise FileNotFoundError(
             f"Review introuvable : {path}\n"
@@ -163,82 +177,86 @@ def _run_nli(
 
 def verify_review(
     draft:           ReviewDraft,
-    claims_lookup:   dict[str, str],
+    claims_lookup:   dict[str, dict | str],
     articles_lookup: dict[str, dict],
     tokenizer,
     model,
     label2id:        dict[str, int],
+    chunks_lookup: dict[str, list[str]] | None = None,
+    nli_fn=None,
 ) -> tuple[ReviewDraft, HallucinationAudit]:
-    """
-    Parcourt chaque VerifiedSentence du draft.
-    - supporting_claim_ids présents → NLI (meilleur score parmi ≤3 claims)
-    - sinon → UNVERIFIABLE
-    Retourne (draft_mis_à_jour, HallucinationAudit).
-    """
-    updated_sentences: list[VerifiedSentence]     = []
+    run_nli = nli_fn or (
+        lambda premise, hypothesis: _run_nli(
+            tokenizer, model, label2id, premise, hypothesis
+        )
+    )
+    chunks_lookup = chunks_lookup or {}
+    updated_sentences: list[VerifiedSentence] = []
     audit_entries:     list[HallucinationAuditEntry] = []
 
     for sent in tqdm(draft.sentences, desc="NLI verify", unit="sent", ncols=80):
-
-        # ── Intro/conclusion sans citations → passage direct ────────────────
         if not sent.citations and not sent.supporting_claim_ids:
             updated_sentences.append(sent)
             continue
 
-        # ── Récupérer les textes des claims supports ────────────────────────
-        premise_texts = [
-            claims_lookup[str(cid)]
-            for cid in sent.supporting_claim_ids
-            if str(cid) in claims_lookup
-        ]
-
-        # ── Pas de premise → UNVERIFIABLE ───────────────────────────────────
-        if not premise_texts:
-            updated_sentences.append(sent)
-            for aid in sent.citations:
-                article = articles_lookup.get(str(aid), {})
-                audit_entries.append(HallucinationAuditEntry(
-                    review_id     = draft.id,
-                    sentence_text = sent.text[:200],
-                    cited_key     = _bibtex_key(article) if article else str(aid)[:8],
-                    status        = VerificationStatus.UNVERIFIABLE,
-                    auditor       = "auto_nli",
-                    note          = "no_premise_available",
-                ))
-            continue
-
-        # ── NLI : tester ≤ MAX_PREMISES claims, garder le meilleur ─────────
-        best_status: VerificationStatus = VerificationStatus.EXISTS_NO_SUPPORT
-        best_score:  float              = 0.0
-
-        for premise in premise_texts[:MAX_PREMISES]:
-            status, score = _run_nli(tokenizer, model, label2id, premise, sent.text)
-            if score > best_score:
-                best_score  = score
-                best_status = status
-            if best_status == VerificationStatus.VERIFIED:
-                break   # optimal trouvé
-
-        # ── Mettre à jour la VerifiedSentence ───────────────────────────────
-        updated_sentences.append(VerifiedSentence(
-            text                  = sent.text,
-            citations             = sent.citations,
-            verification_statuses = [best_status] * len(sent.citations),
-            supporting_claim_ids  = sent.supporting_claim_ids,
-            nli_score             = round(best_score, 4),
-        ))
-
-        # ── Audit entries (une par citation) ────────────────────────────────
+        statuses: list[VerificationStatus] = []
+        notes: list[str] = []
+        max_entailment = 0.0
         for aid in sent.citations:
-            article = articles_lookup.get(str(aid), {})
+            aid_text = str(aid)
+            article = articles_lookup.get(aid_text)
+            if article is None:
+                status = VerificationStatus.HALLUCINATED
+                score = 0.0
+                note = "article_missing_from_corpus"
+            else:
+                premises = []
+                for cid in sent.supporting_claim_ids:
+                    claim = claims_lookup.get(str(cid))
+                    if isinstance(claim, str):
+                        continue
+                    if claim and str(claim.get("article_id")) == aid_text:
+                        premises.append(claim.get("text", ""))
+                premises = [text for text in premises if text]
+                if not premises:
+                    premises = chunks_lookup.get(aid_text, [])[:MAX_PREMISES]
+                if not premises:
+                    status = VerificationStatus.EXISTS_NO_SUPPORT
+                    score = 0.0
+                    note = "no_article_claims_or_chunks"
+                else:
+                    score = 0.0
+                    contradicted = False
+                    status = VerificationStatus.EXISTS_NO_SUPPORT
+                    for premise in premises[:MAX_PREMISES]:
+                        candidate_status, entailment = run_nli(premise, sent.text)
+                        score = max(score, entailment)
+                        if candidate_status == VerificationStatus.VERIFIED:
+                            status = VerificationStatus.VERIFIED
+                        contradicted |= candidate_status == VerificationStatus.HALLUCINATED
+                    note = "contradicted" if contradicted and status != VerificationStatus.VERIFIED else "no_entailment"
+                    if score >= ENTAIL_THRESHOLD:
+                        status = VerificationStatus.VERIFIED
+                        note = "entailment_threshold_met"
+            statuses.append(status)
+            notes.append(note)
+            max_entailment = max(max_entailment, score)
             audit_entries.append(HallucinationAuditEntry(
-                review_id     = draft.id,
-                sentence_text = sent.text[:200],
-                cited_key     = _bibtex_key(article) if article else str(aid)[:8],
-                status        = best_status,
-                auditor       = "auto_nli",
-                note          = f"nli_entail={best_score:.4f} | premises={len(premise_texts)}",
+                review_id=draft.id,
+                sentence_text=sent.text[:200],
+                cited_key=_bibtex_key(article) if article else aid_text[:8],
+                status=status,
+                auditor="auto_nli",
+                note=f"{note} | nli_entail={score:.4f}",
             ))
+
+        updated_sentences.append(VerifiedSentence(
+            text=sent.text,
+            citations=sent.citations,
+            verification_statuses=statuses,
+            supporting_claim_ids=sent.supporting_claim_ids,
+            nli_score=round(max_entailment, 4),
+        ))
 
     # ── Reconstruire le ReviewDraft ─────────────────────────────────────────
     updated_draft = ReviewDraft(
@@ -266,8 +284,10 @@ def verify_review(
 # ─────────────────────────────────────────────────────────────
 
 def _save(draft: ReviewDraft, audit: HallucinationAudit, slug: str) -> None:
-    out_v = REVIEWS_DIR / f"{slug}_verified.json"
-    out_a = REVIEWS_DIR / f"{slug}_audit.json"
+    reviews_dir = config.paths().reviews
+    reviews_dir.mkdir(parents=True, exist_ok=True)
+    out_v = reviews_dir / f"{slug}_verified.json"
+    out_a = reviews_dir / f"{slug}_audit.json"
     out_v.write_text(draft.model_dump_json(indent=2), encoding="utf-8")
     out_a.write_text(audit.model_dump_json(indent=2), encoding="utf-8")
     log.info("Verified → %s", out_v)
@@ -299,10 +319,7 @@ def _print_stats(draft: ReviewDraft, audit: HallucinationAudit) -> None:
 # ─────────────────────────────────────────────────────────────
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(message)s",
-    )
+    config.setup_logging(config.paths().reviews / "nli_log.txt")
     p   = argparse.ArgumentParser(description="SciLit — NLI verification Bronze")
     grp = p.add_mutually_exclusive_group(required=True)
     grp.add_argument("--review", type=str, help="Slug (ex: hallucination-language-model)")
@@ -311,10 +328,12 @@ def main() -> None:
 
     claims_lookup   = _load_claims_lookup()
     articles_lookup = _load_articles_lookup()
+    chunks_lookup = _load_chunks_lookup()
     tokenizer, nli_model, label2id = _load_nli_model()
 
+    reviews_dir = config.paths().reviews
     slugs = (
-        [f.stem for f in REVIEWS_DIR.glob("*.json")
+        [f.stem for f in reviews_dir.glob("*.json")
          if not f.stem.endswith(("_verified", "_audit"))]
         if args.all
         else [args.review]
@@ -325,7 +344,7 @@ def main() -> None:
         draft            = _load_review(slug)
         updated, audit   = verify_review(
             draft, claims_lookup, articles_lookup,
-            tokenizer, nli_model, label2id,
+            tokenizer, nli_model, label2id, chunks_lookup,
         )
         _save(updated, audit, slug)
         _print_stats(updated, audit)

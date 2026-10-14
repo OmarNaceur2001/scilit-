@@ -18,6 +18,7 @@ import logging
 from functools import lru_cache
 from uuid import uuid4
 
+from scilit import config
 from scilit.corpus.index import BM25IndexFull, DenseIndex, rrf_fusion
 from scilit.corpus.parse import load_chunks
 from scilit.schemas import RankedResult, SectionType
@@ -160,10 +161,7 @@ def _print_results(results: list[RankedResult], query: str, mode: str) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(message)s",
-    )
+    config.setup_logging(config.paths().parsed / "retrieval_log.txt")
     p = argparse.ArgumentParser(description="SciLit — retrieval pipeline")
     p.add_argument("--query", required=True, help="Requête de recherche")
     p.add_argument("--k",     type=int, default=5, help="Top-k résultats")

@@ -1,0 +1,88 @@
+{
+  "review_id": "d139681f-f430-4821-a605-14311f287703",
+  "entries": [
+    {
+      "review_id": "d139681f-f430-4821-a605-14311f287703",
+      "sentence_text": "We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely.",
+      "cited_key": "Vaswani2025Attention",
+      "status": "verified",
+      "auditor": "auto_nli",
+      "note": "entailment_threshold_met | nli_entail=0.9851"
+    },
+    {
+      "review_id": "d139681f-f430-4821-a605-14311f287703",
+      "sentence_text": "Most recent analysis has focused on model outputs (e.g., language model surprisal) or internal vector representations (e.g., probing classifiers).Complementary to these works, we propose methods for a",
+      "cited_key": "Clark2019What",
+      "status": "verified",
+      "auditor": "auto_nli",
+      "note": "entailment_threshold_met | nli_entail=0.9803"
+    },
+    {
+      "review_id": "d139681f-f430-4821-a605-14311f287703",
+      "sentence_text": "We propose a taxonomy of attention models according to four dimensions: the representation of the input, the compatibility function, the distribution function, and the multiplicity of the input and/or",
+      "cited_key": "Galassi2020Attention",
+      "status": "verified",
+      "auditor": "auto_nli",
+      "note": "entailment_threshold_met | nli_entail=0.9849"
+    },
+    {
+      "review_id": "d139681f-f430-4821-a605-14311f287703",
+      "sentence_text": "Our model achieves 41.8 BLEU.",
+      "cited_key": "Vaswani2025Attention",
+      "status": "verified",
+      "auditor": "auto_nli",
+      "note": "entailment_threshold_met | nli_entail=0.9975"
+    },
+    {
+      "review_id": "d139681f-f430-4821-a605-14311f287703",
+      "sentence_text": "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks in an encoder-decoder configuration.",
+      "cited_key": "Vaswani2025Attention",
+      "status": "verified",
+      "auditor": "auto_nli",
+      "note": "entailment_threshold_met | nli_entail=0.9844"
+    },
+    {
+      "review_id": "d139681f-f430-4821-a605-14311f287703",
+      "sentence_text": "The best performing models also connect the encoder and decoder through an attention mechanism.",
+      "cited_key": "Vaswani2025Attention",
+      "status": "verified",
+      "auditor": "auto_nli",
+      "note": "entailment_threshold_met | nli_entail=0.9843"
+    },
+    {
+      "review_id": "d139681f-f430-4821-a605-14311f287703",
+      "sentence_text": "We show that well configured Transformer models outperform our baseline models based on the shallow stack of LSTM recurrent neural network layers.",
+      "cited_key": "Irie2019Language",
+      "status": "verified",
+      "auditor": "auto_nli",
+      "note": "entailment_threshold_met | nli_entail=0.9922"
+    },
+    {
+      "review_id": "d139681f-f430-4821-a605-14311f287703",
+      "sentence_text": "A noted limitation: In this work, we address the challenging task of referring segmentation.",
+      "cited_key": "Ding2021VisionLanguage",
+      "status": "exists_no_support",
+      "auditor": "auto_nli",
+      "note": "no_entailment | nli_entail=0.0059"
+    },
+    {
+      "review_id": "d139681f-f430-4821-a605-14311f287703",
+      "sentence_text": "A noted limitation: Second, we show that deep Transformer language models do not require positional encoding.",
+      "cited_key": "Irie2019Language",
+      "status": "exists_no_support",
+      "auditor": "auto_nli",
+      "note": "no_entailment | nli_entail=0.0283"
+    },
+    {
+      "review_id": "d139681f-f430-4821-a605-14311f287703",
+      "sentence_text": "A noted limitation: that deep Transformer language models do not require positional encoding.",
+      "cited_key": "Irie2019Language",
+      "status": "exists_no_support",
+      "auditor": "auto_nli",
+      "note": "no_entailment | nli_entail=0.0039"
+    }
+  ],
+  "audited_at": "2026-10-14T13:16:38.886964Z",
+  "invented_rate": 0.0,
+  "support_rate": 0.7
+}

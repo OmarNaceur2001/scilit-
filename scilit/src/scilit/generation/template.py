@@ -29,9 +29,9 @@ import json
 import logging
 import re
 import unicodedata
-from pathlib import Path
 from uuid import UUID, uuid4
 
+from scilit import config
 from scilit.retrieval.pipeline import search as retrieve
 from scilit.schemas import (
     BibTeXEntry,
@@ -43,10 +43,10 @@ from scilit.schemas import (
 
 log = logging.getLogger(__name__)
 
-PARSED_DIR    = Path("data/parsed")
-REVIEWS_DIR   = PARSED_DIR / "reviews"
+PARSED_DIR    = config.PARSED_DIR
+REVIEWS_DIR   = config.REVIEWS_DIR
 CLAIMS_PATH   = PARSED_DIR / "claims.jsonl"
-ARTICLES_PATH = Path("data/raw/articles.jsonl")
+ARTICLES_PATH = config.RAW_DIR / "articles.jsonl"
 
 PROMPT_VERSION = "v1.0-bronze"
 LLM_MODEL      = "template-bronze-v1"   # Bronze = aucun LLM
@@ -60,20 +60,22 @@ SECTION_ORDER = ["method", "dataset", "finding", "comparison", "limitation", "hy
 # ─────────────────────────────────────────────────────────────
 
 def _load_claims() -> list[dict]:
-    if not CLAIMS_PATH.exists():
+    path = config.paths().parsed / "claims.jsonl"
+    if not path.exists():
         raise FileNotFoundError("Lancer d'abord : python -m scilit.extraction.claims")
     return [
-        json.loads(l)
-        for l in CLAIMS_PATH.read_text(encoding="utf-8").splitlines()
-        if l.strip()
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
     ]
 
 
 def _load_articles() -> dict[str, dict]:
     """uuid_str → article dict."""
+    path = config.paths().raw / "articles.jsonl"
     return {
         a["id"]: a
-        for line in ARTICLES_PATH.read_text(encoding="utf-8").splitlines()
+        for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
         for a in [json.loads(line)]
     }
@@ -93,21 +95,47 @@ def _cap(s: str) -> str:
 
 
 def _bibtex_key(article: dict) -> str:
-    first_author = article["authors"][0].split()[-1] if article["authors"] else "Unknown"
-    first_word   = re.sub(r"[^A-Za-z]", "", article["title"].split()[0]) if article["title"] else "X"
-    return f"{first_author}{article['year']}{first_word}"
+    authors = article.get("authors") or []
+    first_author = authors[0] if authors else "Unknown"
+    last_name = first_author.split(",", 1)[0] if "," in first_author else first_author.split()[-1]
+    title_words = re.findall(r"[A-Za-zÀ-ÿ0-9]+", article.get("title", ""))
+    first_word = next(
+        (word for word in title_words if word.lower() not in {"a", "an", "the", "of", "for", "on", "in"}),
+        "X",
+    )
+    def fold(value: str) -> str:
+        return unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
+    author_key = re.sub(r"[^A-Za-z0-9]", "", fold(last_name)) or "Unknown"
+    title_key = re.sub(r"[^A-Za-z0-9]", "", fold(first_word)) or "X"
+    return f"{author_key}{article.get('year', 0)}{title_key}"
 
 
-def _make_bibtex(article: dict) -> BibTeXEntry:
+def _make_bibtex(article: dict, bibtex_key: str | None = None) -> BibTeXEntry:
+    source = article.get("source", {})
+    venue_name = article.get("venue_name") or source.get("venue_name") or source.get("venue", "Other")
+    arxiv_id = source.get("arxiv_id")
+    acl_id = source.get("acl_id")
+    if arxiv_id:
+        entry_type = "misc"
+    elif acl_id:
+        entry_type = "inproceedings"
+    else:
+        entry_type = "article"
     return BibTeXEntry(
         article_id = UUID(article["id"]),
-        bibtex_key = _bibtex_key(article),
-        entry_type = "article",
+        bibtex_key = bibtex_key or _bibtex_key(article),
+        entry_type = entry_type,
         title      = article["title"],
         authors    = article["authors"],
         year       = article["year"],
-        venue      = article.get("source", {}).get("venue", "arXiv"),
-        url        = article.get("source", {}).get("url"),
+        venue      = venue_name,
+        url        = source.get("url"),
+        doi        = article.get("doi") or source.get("doi"),
+        booktitle  = venue_name if entry_type == "inproceedings" else None,
+        journal    = venue_name if entry_type == "article" else None,
+        eprint     = arxiv_id,
+        archive_prefix = "arXiv" if arxiv_id else None,
+        howpublished = f"\\url{{https://arxiv.org/abs/{arxiv_id}}}" if arxiv_id else None,
     )
 
 
@@ -239,7 +267,7 @@ def generate(
         _make_vs(
             f"This survey covers recent work on {query}, "
             f"drawing from {len(retrieved_article_ids)} papers.",
-            list(retrieved_article_ids)[:3],
+            [],
         )
     ]
 
@@ -329,11 +357,19 @@ def generate(
     )
 
     # ── 7. BibTeX ─────────────────────────────────────────────────────────────
-    bibtex_entries = [
-        _make_bibtex(articles_db[aid])
-        for aid in retrieved_article_ids
-        if aid in articles_db
-    ]
+    used_keys: set[str] = set()
+    bibtex_entries = []
+    for aid in sorted(retrieved_article_ids):
+        if aid not in articles_db:
+            continue
+        base_key = _bibtex_key(articles_db[aid])
+        key = base_key
+        suffix = ord("a")
+        while key in used_keys:
+            key = f"{base_key}{chr(suffix)}"
+            suffix += 1
+        used_keys.add(key)
+        bibtex_entries.append(_make_bibtex(articles_db[aid], key))
 
     return draft, bibtex_entries
 
@@ -343,9 +379,10 @@ def generate(
 # ─────────────────────────────────────────────────────────────
 
 def _save(draft: ReviewDraft, bibtex_entries: list[BibTeXEntry], slug: str) -> None:
-    REVIEWS_DIR.mkdir(parents=True, exist_ok=True)
-    out_json = REVIEWS_DIR / f"{slug}.json"
-    out_bib  = REVIEWS_DIR / f"{slug}.bib"
+    reviews_dir = config.paths().reviews
+    reviews_dir.mkdir(parents=True, exist_ok=True)
+    out_json = reviews_dir / f"{slug}.json"
+    out_bib  = reviews_dir / f"{slug}.bib"
     out_json.write_text(draft.model_dump_json(indent=2), encoding="utf-8")
     out_bib.write_text(
         "\n\n".join(e.to_bibtex() for e in bibtex_entries),
@@ -375,10 +412,7 @@ def _print_review(draft: ReviewDraft, bibtex_entries: list[BibTeXEntry]) -> None
 # ─────────────────────────────────────────────────────────────
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(message)s",
-    )
+    config.setup_logging(config.paths().reviews / "template_log.txt")
     p = argparse.ArgumentParser(description="SciLit — template generation Bronze")
     p.add_argument("--query", required=True, help="Sujet de la revue")
     p.add_argument("--k",     type=int, default=20, help="Top-k chunks retrieval (défaut: 20)")

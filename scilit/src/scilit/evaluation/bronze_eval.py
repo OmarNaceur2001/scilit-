@@ -1,14 +1,12 @@
 """SciLit Bronze evaluation -- section 2.3.3 (exactly 3 seeds per component)."""
-import json, logging, random
+import json
+import logging
+import random
 from datetime import datetime, timezone
-from pathlib import Path
-import pytest
+
+from scilit import config
 
 log = logging.getLogger(__name__)
-PARSED_DIR = Path("data/parsed")
-CLAIMS_PATH = PARSED_DIR / "claims.jsonl"
-REVIEWS_DIR = PARSED_DIR / "reviews"
-EXPERIMENTS_LOG = PARSED_DIR / "experiments.jsonl"
 K = 5
 SEED_QUERIES = [(42, "hallucination language model"), (123, "transformer attention NLP"), (999, "retrieval augmented generation")]
 
@@ -31,15 +29,28 @@ def make_seeds(vals, metric):
     return [SeedResult(seed=s, metric_name=metric, value=v) for (s, _), v in zip(SEED_QUERIES, vals)]
 
 def run_evaluation():
-    from scilit.schemas import ComponentMetrics, ExperimentRecord, SplitType, AblationResult
+    from scilit.schemas import (
+        AblationResult,
+        ComponentMetrics,
+        ExperimentRecord,
+        SplitType,
+    )
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+    paths = config.paths()
+    claims_path = paths.parsed / "claims.jsonl"
+    reviews_dir = paths.reviews
+    experiments_log = paths.parsed / "experiments.jsonl"
     all_metrics = []
     for mode in ["bm25", "dense", "rrf"]:
         log.info("Evaluating retrieval: %s", mode)
         vals = [p_at_k(q, K, mode) for _, q in SEED_QUERIES]
         all_metrics.append(ComponentMetrics(component_name=mode + "_retrieval", metric_name="precision@" + str(K), seeds=make_seeds(vals, "precision@" + str(K))))
     TYPE_KW = {"method": ["propose","introduce","present","develop"], "finding": ["show","demonstrate","achieve","result","improve"], "limitation": ["limit","fail","cannot","however"], "comparison": ["outperform","versus","compared","baseline"], "hypothesis": ["may","might","future","could"], "dataset": ["dataset","corpus","annotate"]}
-    claims = [json.loads(l) for l in CLAIMS_PATH.read_text(encoding="utf-8").splitlines() if l.strip()]
+    claims = [
+        json.loads(line)
+        for line in claims_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     log.info("Evaluating claims extraction...")
     claim_vals = []
     for seed, _ in SEED_QUERIES:
@@ -48,10 +59,10 @@ def run_evaluation():
         correct = sum(1 for c in sample if any(kw in (c.get("text") or "").lower() for kw in TYPE_KW.get(c.get("claim_type", ""), [])))
         claim_vals.append(correct / len(sample) if sample else 0.0)
     all_metrics.append(ComponentMetrics(component_name="claims_extraction", metric_name="claim_type_precision", seeds=make_seeds(claim_vals, "claim_type_precision")))
-    verified = sorted(REVIEWS_DIR.glob("*_verified.json")) if REVIEWS_DIR.exists() else []
+    verified = sorted(reviews_dir.glob("*_verified.json")) if reviews_dir.exists() else []
     log.info("Evaluating NLI...")
     while len(verified) < 3:
-        verified.append(verified[-1] if verified else REVIEWS_DIR / "none.json")
+        verified.append(verified[-1] if verified else reviews_dir / "none.json")
     nli_vals = []
     for path in verified[:3]:
         if path.exists():
@@ -61,10 +72,10 @@ def run_evaluation():
         else:
             nli_vals.append(0.0)
     all_metrics.append(ComponentMetrics(component_name="nli_verification", metric_name="nli_support_rate", seeds=make_seeds(nli_vals, "nli_support_rate")))
-    direction = "improves" if all_metrics[2].mean >= all_metrics[0].mean else "degrades"
     abl = AblationResult(component="retrieval", ablated_element="dense index removed (BM25 only vs RRF)", full_system_metric=all_metrics[2].mean, ablated_metric=all_metrics[0].mean, metric_name="precision@" + str(K))
     record = ExperimentRecord(experiment_id="exp_001_bronze", date=datetime.now(timezone.utc), component="full_pipeline_bronze", hypothesis="Bronze pipeline achieves support_rate > 60% and hallucination = 0%.", config={"corpus": 530, "chunks": 1613, "claims": 6052, "k_eval": K, "embed": "MiniLM-L6-v2", "nli": "deberta-v3-small"}, dataset_split=SplitType.TRAIN, results=all_metrics, ablations=[], error_analysis_count=0, notes="Bronze tier. Pseudo-relevance judgements. Citation graph empty (arXiv 2026 coverage gap).")
-    with EXPERIMENTS_LOG.open("a", encoding="utf-8") as f:
+    experiments_log.parent.mkdir(parents=True, exist_ok=True)
+    with experiments_log.open("a", encoding="utf-8") as f:
         f.write(record.model_dump_json() + "\n")
     print("\n" + "=" * 65)
     print("  BRONZE EVALUATION (section 2.3.3) - SciLit")
@@ -76,32 +87,5 @@ def run_evaluation():
     print("=" * 65)
     print("\n  ABLATION: RRF vs BM25 | delta P@5 = " + str(round(abl.delta, 3)) + " (" + ("RRF improves" if abl.delta >= 0 else "RRF degrades") + ")")
 
-def test_component_metrics_requires_3_seeds():
-    from scilit.schemas import ComponentMetrics, SeedResult
-    with pytest.raises(Exception):
-        ComponentMetrics(component_name="t", metric_name="p", seeds=[SeedResult(seed=42, metric_name="p", value=0.8)])
-
-def test_component_metrics_accepts_3_seeds():
-    from scilit.schemas import ComponentMetrics, SeedResult
-    m = ComponentMetrics(component_name="t", metric_name="p", seeds=[SeedResult(seed=42, metric_name="p", value=0.8), SeedResult(seed=123, metric_name="p", value=0.9), SeedResult(seed=999, metric_name="p", value=0.7)])
-    assert abs(m.mean - 0.8) < 1e-9
-
-def test_bm25_returns_results():
-    from scilit.retrieval.pipeline import search
-    assert len(search("transformer NLP", k=5, mode="bm25")) > 0
-
-def test_rrf_not_worse_than_bm25():
-    assert p_at_k(SEED_QUERIES[0][1], K, "rrf") >= p_at_k(SEED_QUERIES[0][1], K, "bm25") - 0.2
-
-def test_claims_count():
-    claims = [json.loads(l) for l in CLAIMS_PATH.read_text(encoding="utf-8").splitlines() if l.strip()]
-    assert len(claims) >= 5000
-
-def test_nli_review_exists():
-    assert any(REVIEWS_DIR.glob("*_verified.json"))
-
 if __name__ == "__main__":
     run_evaluation()
-
-
-

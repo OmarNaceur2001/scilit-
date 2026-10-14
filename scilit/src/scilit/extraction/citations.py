@@ -19,11 +19,11 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid5
 
 from tqdm import tqdm
 
+from scilit import config
 from scilit.schemas import (
     CitationFunction,
     CitationGraph,
@@ -33,12 +33,12 @@ from scilit.schemas import (
 
 log = logging.getLogger(__name__)
 
-RAW_ARTICLES  = Path("data/raw/articles.jsonl")
-REFS_RAW      = Path("data/parsed/refs_raw.jsonl")
-OUT_CITATIONS = Path("data/parsed/citations.jsonl")
-OUT_GRAPH     = Path("data/parsed/citation_graph.json")
+RAW_ARTICLES  = config.RAW_DIR / "articles.jsonl"
+REFS_RAW      = config.PARSED_DIR / "refs_raw.jsonl"
+OUT_CITATIONS = config.PARSED_DIR / "citations.jsonl"
+OUT_GRAPH     = config.PARSED_DIR / "citation_graph.json"
 
-BRONZE_CONTEXT = "[Bronze: metadata-only reference, no in-text context]"
+BRONZE_CONTEXT = "Metadata-only reference."
 
 
 # ─────────────────────────────────────────────────────────────
@@ -47,24 +47,26 @@ BRONZE_CONTEXT = "[Bronze: metadata-only reference, no in-text context]"
 
 def _load_articles() -> dict[str, dict]:
     """Returns {scilit_uuid_str → article_dict}."""
+    path = config.paths().raw / "articles.jsonl"
     return {
         a["id"]: a
-        for line in RAW_ARTICLES.read_text(encoding="utf-8").splitlines()
+        for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
         for a in [json.loads(line)]
     }
 
 
 def _load_refs() -> list[dict]:
-    if not REFS_RAW.exists():
+    path = config.paths().parsed / "refs_raw.jsonl"
+    if not path.exists():
         raise FileNotFoundError(
-            f"{REFS_RAW} introuvable. Lance d'abord :\n"
+            f"{path} introuvable. Lance d'abord :\n"
             "  python -m scilit.extraction.fetch_refs"
         )
     return [
-        json.loads(l)
-        for l in REFS_RAW.read_text(encoding="utf-8").splitlines()
-        if l.strip()
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
     ]
 
 
@@ -74,7 +76,7 @@ def _load_refs() -> list[dict]:
 
 def build_citations(
     uuid_map: dict[str, dict],
-    refs: list[dict],
+    refs: list[dict] | None = None,
 ) -> tuple[list[InTextCitation], CitationGraph]:
     """
     1. Construit oa_to_uuid : openalex_id → scilit_uuid depuis refs_raw
@@ -87,11 +89,26 @@ def build_citations(
     """
 
     # ── 1. openalex_id → scilit_uuid ────────────────────────────────────────
+    articles = list(uuid_map.values())
     oa_to_uuid: dict[str, str] = {
+        article["openalex_id"]: article["id"]
+        for article in articles
+        if article.get("openalex_id")
+    }
+    if refs is None:
+        refs = [
+            {
+                "scilit_uuid": article["id"],
+                "openalex_id": article.get("openalex_id"),
+                "references": article.get("referenced_works", []),
+            }
+            for article in articles
+        ]
+    oa_to_uuid.update({
         r["openalex_id"]: r["scilit_uuid"]
         for r in refs
-        if r.get("openalex_id")
-    }
+        if r.get("openalex_id") and r.get("scilit_uuid")
+    })
     log.info(
         "Corpus : %d articles | %d avec openalex_id résolu.",
         len(uuid_map), len(oa_to_uuid),
@@ -104,10 +121,11 @@ def build_citations(
     for entry in tqdm(refs, desc="Citations", unit="article", ncols=80):
         src_uuid_str = entry["scilit_uuid"]
 
-        for oa_ref_id in entry.get("references", []):
+        for ref_index, oa_ref_id in enumerate(entry.get("references", [])):
             tgt_uuid_str = oa_to_uuid.get(oa_ref_id)  # None → hors corpus
 
             citations.append(InTextCitation(
+                id=uuid5(UUID(src_uuid_str), f"citation:{ref_index}"),
                 source_article_id = UUID(src_uuid_str),
                 target_article_id = UUID(tgt_uuid_str) if tgt_uuid_str else None,
                 target_raw_ref    = oa_ref_id,
@@ -146,16 +164,20 @@ def build_citations(
 # ─────────────────────────────────────────────────────────────
 
 def _save(citations: list[InTextCitation], graph: CitationGraph) -> None:
-    with OUT_CITATIONS.open("w", encoding="utf-8") as f:
+    paths = config.paths().parsed
+    paths.mkdir(parents=True, exist_ok=True)
+    citations_path = paths / "citations.jsonl"
+    graph_path = paths / "citation_graph.json"
+    with citations_path.open("w", encoding="utf-8") as f:
         for c in citations:
             f.write(c.model_dump_json() + "\n")
-    log.info("%d citations → %s", len(citations), OUT_CITATIONS)
+    log.info("%d citations → %s", len(citations), citations_path)
 
-    OUT_GRAPH.write_text(
+    graph_path.write_text(
         graph.model_dump_json(indent=2),
         encoding="utf-8",
     )
-    log.info("CitationGraph → %s", OUT_GRAPH)
+    log.info("CitationGraph → %s", graph_path)
 
 
 def _print_stats(citations: list[InTextCitation], graph: CitationGraph) -> None:
@@ -164,7 +186,7 @@ def _print_stats(citations: list[InTextCitation], graph: CitationGraph) -> None:
     avg_refs = len(citations) / max(len(graph.nodes), 1)
 
     print(f"\n{'='*55}")
-    print(f"  CITATION GRAPH")
+    print("  CITATION GRAPH")
     print(f"  Nœuds (articles)  : {len(graph.nodes)}")
     print(f"  Arêtes internes   : {len(graph.edges)}")
     print(f"  Densité           : {graph.density:.5f}")
@@ -181,15 +203,9 @@ def _print_stats(citations: list[InTextCitation], graph: CitationGraph) -> None:
 # ─────────────────────────────────────────────────────────────
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(message)s",
-    )
+    config.setup_logging(config.paths().parsed / "citations_log.txt")
     uuid_map = _load_articles()
-    refs     = _load_refs()
-    log.info("%d entrées dans refs_raw.jsonl.", len(refs))
-
-    citations, graph = build_citations(uuid_map, refs)
+    citations, graph = build_citations(uuid_map)
     _save(citations, graph)
     _print_stats(citations, graph)
 

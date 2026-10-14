@@ -19,16 +19,17 @@ from __future__ import annotations
 import json
 import logging
 import time
-from pathlib import Path
 
 import requests
 from tqdm import tqdm
 
+from scilit import config
+
 log = logging.getLogger(__name__)
 
-RAW_ARTICLES  = Path("data/raw/articles.jsonl")
-OUT_REFS      = Path("data/parsed/refs_raw.jsonl")
-OUT_SKIPPED   = Path("data/parsed/refs_skipped.jsonl")
+RAW_ARTICLES  = config.RAW_DIR / "articles.jsonl"
+OUT_REFS      = config.PARSED_DIR / "refs_raw.jsonl"
+OUT_SKIPPED   = config.PARSED_DIR / "refs_skipped.jsonl"
 OA_API        = "https://api.openalex.org/works"
 BATCH_SIZE    = 50
 SLEEP_BETWEEN = 0.2
@@ -40,22 +41,24 @@ MAX_RETRIES   = 3
 # ─────────────────────────────────────────────────────────────
 
 def _load_articles() -> list[dict]:
+    path = config.paths().raw / "articles.jsonl"
     return [
-        json.loads(l)
-        for l in RAW_ARTICLES.read_text(encoding="utf-8").splitlines()
-        if l.strip()
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
     ]
 
 
 def _done_uuids() -> set[str]:
     """UUIDs already in refs_raw OR refs_skipped — pour reprendre sans doublons."""
     done: set[str] = set()
-    for path in (OUT_REFS, OUT_SKIPPED):
+    paths = config.paths().parsed
+    for path in (paths / "refs_raw.jsonl", paths / "refs_skipped.jsonl"):
         if path.exists():
-            for l in path.read_text(encoding="utf-8").splitlines():
-                if l.strip():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
                     try:
-                        done.add(json.loads(l)["scilit_uuid"])
+                        done.add(json.loads(line)["scilit_uuid"])
                     except (json.JSONDecodeError, KeyError):
                         pass
     return done
@@ -106,10 +109,13 @@ def _parse_arxiv_id(work: dict) -> str | None:
 # ─────────────────────────────────────────────────────────────
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(message)s",
-    )
+    paths = config.paths()
+    config.setup_logging(paths.parsed / "fetch_refs_log.txt")
+    paths.parsed.mkdir(parents=True, exist_ok=True)
+    global OUT_REFS, OUT_SKIPPED
+    OUT_REFS = paths.parsed / "refs_raw.jsonl"
+    OUT_SKIPPED = paths.parsed / "refs_skipped.jsonl"
+    config.setup_logging(paths.parsed / "fetch_refs_log.txt")
 
     articles = _load_articles()
     done     = _done_uuids()
