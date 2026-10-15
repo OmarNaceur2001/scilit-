@@ -87,7 +87,7 @@ def _get_articles() -> dict[str, dict]:
 # ─────────────────────────────────────────────────────────────
 
 class SearchRequest(BaseModel):
-    query: str  = Field(..., min_length=2, example="hallucination language model")
+    query: str  = Field(..., min_length=2, json_schema_extra={"example": "hallucination language model"})
     k:     int  = Field(10, ge=1, le=50)
     mode:  Literal["rrf", "bm25", "dense"] = "rrf"
 
@@ -110,7 +110,7 @@ class SearchResponse(BaseModel):
 
 
 class GenerateRequest(BaseModel):
-    query: str = Field(..., min_length=2, example="transformer attention NLP")
+    query: str = Field(..., min_length=2, json_schema_extra={"example": "transformer attention NLP"})
     k:     int = Field(20, ge=5, le=50, description="Top-k chunks retrieval")
     max_sentences_per_type: int = Field(3, ge=1, le=10)
     run_nli: bool = Field(True,  description="Lancer la vérification NLI après génération")
@@ -364,3 +364,4 @@ def list_claims(
         )
         for c in claims[:limit]
     ]
+
