@@ -223,7 +223,7 @@ def _make_vs(
 
 def generate(
     query:                  str,
-    k:                      int = 20,
+    k:                      int = config.DEFAULT_TOP_K,
     max_sentences_per_type: int = 3,
 ) -> tuple[ReviewDraft, list[BibTeXEntry]]:
     """
@@ -238,7 +238,7 @@ def generate(
 
     # ── 1. Retrieval ─────────────────────────────────────────────────────────
     log.info("Retrieval RRF : '%s' (k=%d)...", query, k)
-    ranked = retrieve(query, k=k, mode="rrf")
+    ranked = retrieve(query, k=k, mode=config.RETRIEVAL_MODE)
     if not ranked:
         raise ValueError(f"Aucun résultat retrieval pour : '{query}'")
 
@@ -415,7 +415,7 @@ def main() -> None:
     config.setup_logging(config.paths().reviews / "template_log.txt")
     p = argparse.ArgumentParser(description="SciLit — template generation Bronze")
     p.add_argument("--query", required=True, help="Sujet de la revue")
-    p.add_argument("--k",     type=int, default=20, help="Top-k chunks retrieval (défaut: 20)")
+    p.add_argument("--k",     type=int, default=config.DEFAULT_TOP_K, help="Top-k chunks retrieval from .env")
     p.add_argument("--max",   type=int, default=3,  help="Phrases max par type de claim (défaut: 3)")
     args = p.parse_args()
 

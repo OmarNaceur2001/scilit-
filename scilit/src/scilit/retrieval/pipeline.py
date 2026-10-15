@@ -58,8 +58,8 @@ def _chunk_lookup() -> dict[str, dict]:
 
 def search(
     query:      str,
-    k:          int = 10,
-    mode:       str = "rrf",
+    k:          int = config.DEFAULT_TOP_K,
+    mode:       str = config.RETRIEVAL_MODE,
     bm25_pool:  int = 50,
     dense_pool: int = 50,
 ) -> list[RankedResult]:
@@ -164,12 +164,12 @@ def main() -> None:
     config.setup_logging(config.paths().parsed / "retrieval_log.txt")
     p = argparse.ArgumentParser(description="SciLit — retrieval pipeline")
     p.add_argument("--query", required=True, help="Requête de recherche")
-    p.add_argument("--k",     type=int, default=5, help="Top-k résultats")
+    p.add_argument("--k",     type=int, default=config.DEFAULT_TOP_K, help="Top-k résultats")
     p.add_argument(
         "--mode",
         choices=["rrf", "bm25", "dense"],
-        default="rrf",
-        help="Mode retrieval (défaut: rrf)",
+        default=config.RETRIEVAL_MODE,
+        help="Mode retrieval lu depuis RETRIEVAL_MODE (.env)",
     )
     args = p.parse_args()
 

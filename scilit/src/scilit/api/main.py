@@ -22,6 +22,9 @@ import logging
 from functools import lru_cache
 from typing import Literal
 
+from pathlib import Path
+from fastapi.responses import HTMLResponse
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
@@ -35,12 +38,15 @@ log = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title        = "SciLit API",
-    description  = "Bronze literature-review assistant — ESPRIT NLP 2026-2027",
+    title        = config.APP_NAME,
+    description  = f"{config.APP_NAME} literature-review assistant — ESPRIT NLP 2026-2027",
     version      = "0.2.0",
     docs_url     = "/docs",
     redoc_url    = "/redoc",
 )
+@app.get("/ui", response_class=HTMLResponse, include_in_schema=False)
+def ui():
+    return (Path(__file__).parent / "ui.html").read_text(encoding="utf-8")
 
 PARSED_DIR    = config.PARSED_DIR
 RAW_DIR       = config.RAW_DIR
@@ -88,8 +94,8 @@ def _get_articles() -> dict[str, dict]:
 
 class SearchRequest(BaseModel):
     query: str  = Field(..., min_length=2, json_schema_extra={"example": "hallucination language model"})
-    k:     int  = Field(10, ge=1, le=50)
-    mode:  Literal["rrf", "bm25", "dense"] = "rrf"
+    k:     int  = Field(config.DEFAULT_TOP_K, ge=1, le=50)
+    mode:  Literal["rrf", "bm25", "dense"] = config.RETRIEVAL_MODE
 
 
 class SearchResult(BaseModel):
@@ -111,7 +117,7 @@ class SearchResponse(BaseModel):
 
 class GenerateRequest(BaseModel):
     query: str = Field(..., min_length=2, json_schema_extra={"example": "transformer attention NLP"})
-    k:     int = Field(20, ge=5, le=50, description="Top-k chunks retrieval")
+    k:     int = Field(config.DEFAULT_TOP_K, ge=5, le=50, description="Top-k chunks retrieval")
     max_sentences_per_type: int = Field(3, ge=1, le=10)
     run_nli: bool = Field(True,  description="Lancer la vérification NLI après génération")
 
@@ -365,3 +371,13 @@ def list_claims(
         for c in claims[:limit]
     ]
 
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "scilit.api.main:app",
+        host=config.API_HOST,
+        port=config.API_PORT,
+        reload=config.APP_ENV == "development",
+    )

@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>SciLit — Assistant de revue de littérature</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f7fa; color: #1a1a2e; min-height: 100vh; }
+    header { background: #1a1a2e; color: white; padding: 20px 40px; display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 1.4rem; font-weight: 600; }
+    header span { background: #4CAF50; color: white; font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; }
+    .container { max-width: 860px; margin: 40px auto; padding: 0 20px; }
+    .search-box { background: white; border-radius: 12px; padding: 28px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); margin-bottom: 24px; }
+    .search-box h2 { font-size: 1rem; color: #555; margin-bottom: 14px; }
+    .input-row { display: flex; gap: 10px; }
+    input[type=text] { flex: 1; padding: 12px 16px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1rem; outline: none; transition: border 0.2s; }
+    input[type=text]:focus { border-color: #1a1a2e; }
+    .btn { padding: 12px 22px; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; font-weight: 600; transition: opacity 0.2s; }
+    .btn:hover { opacity: 0.85; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: #1a1a2e; color: white; }
+    .btn-secondary { background: #e8f5e9; color: #2e7d32; }
+    .options { margin-top: 12px; display: flex; gap: 20px; align-items: center; font-size: 0.88rem; color: #666; }
+    .options label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    .result-box { background: white; border-radius: 12px; padding: 28px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); display: none; }
+    .result-box.visible { display: block; }
+    .result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; flex-wrap: wrap; gap: 10px; }
+    .result-title { font-size: 1.15rem; font-weight: 700; color: #1a1a2e; }
+    .stats { display: flex; gap: 12px; flex-wrap: wrap; }
+    .badge { padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; }
+    .badge-green { background: #e8f5e9; color: #2e7d32; }
+    .badge-blue { background: #e3f2fd; color: #1565c0; }
+    .badge-orange { background: #fff3e0; color: #e65100; }
+    .sentences { margin-top: 14px; }
+    .sentence { padding: 12px 14px; border-left: 3px solid #e0e0e0; margin-bottom: 10px; border-radius: 0 6px 6px 0; background: #fafafa; font-size: 0.93rem; line-height: 1.55; }
+    .sentence.verified { border-left-color: #4CAF50; background: #f1f8e9; }
+    .sentence.unverifiable { border-left-color: #90a4ae; }
+    .sentence.hallucinated { border-left-color: #f44336; background: #ffebee; }
+    .sentence-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; color: #888; }
+    .bib-btn { margin-top: 18px; }
+    .search-results { margin-top: 14px; }
+    .chunk { padding: 12px; background: #fafafa; border: 1px solid #eee; border-radius: 6px; margin-bottom: 8px; font-size: 0.88rem; }
+    .chunk-meta { font-size: 0.75rem; color: #999; margin-bottom:4px; }
+    .score { background: #1a1a2e; color: white; border-radius: 4px; padding: 1px 6px; font-size: 0.72rem; }
+    .spinner { display: none; text-align: center; padding: 30px; color: #888; font-size: 0.95rem; }
+    .spinner.visible { display: block; }
+    .error { background: #ffebee; color: #c62828; padding: 14px; border-radius: 8px; font-size: 0.9rem; display: none; }
+    .error.visible { display: block; }
+    .tabs { display: flex; gap: 2px; margin-bottom: 18px; border-bottom: 2px solid #eee; }
+    .tab { padding: 8px 18px; cursor: pointer; font-size: 0.9rem; border-bottom: 2px solid transparent; margin-bottom: -2px; color: #888; }
+    .tab.active { color: #1a1a2e; font-weight: 600; border-bottom-color: #1a1a2e; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🔬 SciLit</h1>
+  <span>Bronze</span>
+  <span style="background:#555; font-size:0.7rem; padding:2px 8px; border-radius:10px;">1500 articles NLP</span>
+</header>
+
+<div class="container">
+  <div class="search-box">
+    <h2>Posez votre question de recherche</h2>
+    <div class="input-row">
+      <input type="text" id="query" placeholder="ex: transformer attention mechanism NLP" value="hallucination language model" />
+      <button class="btn btn-secondary" onclick="doSearch()">🔍 Rechercher</button>
+      <button class="btn btn-primary" onclick="doGenerate()">📝 Générer une revue</button>
+    </div>
+    <div class="options">
+      <label><input type="radio" name="mode" value="rrf" checked> RRF (hybride)</label>
+      <label><input type="radio" name="mode" value="bm25"> BM25</label>
+      <label><input type="radio" name="mode" value="dense"> Dense</label>
+      <span style="margin-left:auto;">Top-k : <input type="number" id="topk" value="10" min="1" max="50" style="width:55px; padding:4px 6px; border:1px solid #ddd; border-radius:4px;"></span>
+    </div>
+  </div>
+
+  <div class="spinner" id="spinner">⏳ Traitement en cours...</div>
+  <div class="error" id="error"></div>
+
+  <div class="result-box" id="result">
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('review')">Revue générée</div>
+      <div class="tab" onclick="switchTab('search')">Résultats de recherche</div>
+    </div>
+    <div class="tab-content active" id="tab-review">
+      <div class="result-header">
+        <div class="result-title" id="review-title">—</div>
+        <div class="stats" id="review-stats"></div>
+      </div>
+      <div class="sentences" id="sentences"></div>
+      <div class="bib-btn">
+        <button class="btn btn-secondary" onclick="downloadBib()" id="bib-btn">📄 Télécharger BibTeX</button>
+      </div>
+    </div>
+    <div class="tab-content" id="tab-search">
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+let currentSlug = null;
+let lastSearchResults = [];
+
+function getMode() { return document.querySelector('input[name=mode]:checked').value; }
+function getK()    { return parseInt(document.getElementById('topk').value) || 10; }
+function getQuery(){ return document.getElementById('query').value.trim(); }
+
+function show(id)  { document.getElementById(id).classList.add('visible'); }
+function hide(id)  { document.getElementById(id).classList.remove('visible'); }
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['review','search'][i]===name));
+  document.querySelectorAll('.tab-content').forEach((t,i) => t.classList.toggle('active', ['tab-review','tab-search'][i]==='tab-'+name));
+}
+
+function slugify(s) { return s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').substring(0,60); }
+
+async function doSearch() {
+  const q = getQuery(); if (!q) return;
+  hide('result'); hide('error');
+  show('spinner'); document.getElementById('spinner').textContent = '🔍 Recherche en cours...';
+  try {
+    const r = await fetch(`${API}/search`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({query:q, k:getK(), mode:getMode()})
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    lastSearchResults = data.results;
+    renderSearch(data);
+    switchTab('search');
+    show('result');
+  } catch(e) {
+    document.getElementById('error').textContent = '❌ Erreur : ' + e.message;
+    show('error');
+  } finally { hide('spinner'); }
+}
+
+async function doGenerate() {
+  const q = getQuery(); if (!q) return;
+  hide('result'); hide('error');
+  show('spinner'); document.getElementById('spinner').textContent = '📝 Génération de la revue (BM25 + Dense + RRF + NLI)...';
+  try {
+    const r = await fetch(`${API}/generate`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({query:q, k:getK(), run_nli:true})
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    currentSlug = data.slug;
+    renderReview(data, q);
+    switchTab('review');
+    show('result');
+  } catch(e) {
+    document.getElementById('error').textContent = '❌ Erreur : ' + e.message;
+    show('error');
+  } finally { hide('spinner'); }
+}
+
+function renderReview(data, query) {
+  document.getElementById('review-title').textContent = data.title || ('Revue : ' + query);
+  const stats = document.getElementById('review-stats');
+  const halluPct = (data.hallucination_rate * 100).toFixed(0);
+  const suppPct  = (data.support_rate * 100).toFixed(0);
+  stats.innerHTML = `
+    <span class="badge badge-blue">${data.n_sentences} phrases</span>
+    <span class="badge badge-blue">${data.n_bibtex} références</span>
+    <span class="badge badge-green">✓ ${suppPct}% vérifiées</span>
+    <span class="badge ${halluPct>0?'badge-orange':'badge-green'}">⚠ ${halluPct}% hallucinées</span>`;
+
+  const slug = data.slug || slugify(query);
+  currentSlug = slug;
+
+  fetch(`${API}/review/${slug}_verified`)
+    .then(r => r.ok ? r.json() : fetch(`${API}/review/${slug}`).then(r2=>r2.json()))
+    .then(rev => {
+      const container = document.getElementById('sentences');
+      container.innerHTML = '';
+      (rev.sentences||[]).forEach((s,i) => {
+        const st = (s.verification_statuses||[])[0] || 'unverifiable';
+        const nli = s.nli_score != null ? ` · NLI=${(s.nli_score*100).toFixed(0)}%` : '';
+        const cls = st === 'verified' ? 'verified' : st === 'hallucinated' ? 'hallucinated' : 'unverifiable';
+        container.innerHTML += `<div class="sentence ${cls}">
+          <div class="sentence-label">${st}${nli}</div>
+          ${escHtml(s.text)}
+        </div>`;
+      });
+    })
+    .catch(() => {
+      document.getElementById('sentences').innerHTML = `<p style="color:#888">Chargement du contenu...</p>`;
+    });
+}
+
+function renderSearch(data) {
+  const container = document.getElementById('search-results');
+  container.innerHTML = `<p style="color:#888;font-size:0.85rem;margin-bottom:12px;">${data.results.length} résultats — mode <strong>${data.mode.toUpperCase()}</strong></p>`;
+  data.results.forEach(r => {
+    const score = r.rrf_score != null ? `rrf=${r.rrf_score.toFixed(4)}` : (r.bm25_rank ? `bm25 #${r.bm25_rank}` : `dense #${r.dense_rank}`);
+    container.innerHTML += `<div class="chunk">
+      <div class="chunk-meta">#${r.rank} · <span class="score">${score}</span> · ${r.section_type} · article ${r.article_id.substring(0,8)}</div>
+      ${escHtml((r.preview||'').substring(0,280))}${r.preview && r.preview.length>280?'…':''}
+    </div>`;
+  });
+}
+
+async function downloadBib() {
+  if (!currentSlug) return;
+  try {
+    const r = await fetch(`${API}/export/bibtex/${currentSlug}`);
+    if (!r.ok) throw new Error('BibTeX non trouvé');
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=currentSlug+'.bib'; a.click();
+    URL.revokeObjectURL(url);
+  } catch(e) { alert('Erreur BibTeX : '+e.message); }
+}
+
+function escHtml(s) {
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+document.getElementById('query').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doGenerate();
+});
+</script>
+</body>
+</html>
