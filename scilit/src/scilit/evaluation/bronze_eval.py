@@ -73,7 +73,7 @@ def run_evaluation():
             nli_vals.append(0.0)
     all_metrics.append(ComponentMetrics(component_name="nli_verification", metric_name="nli_support_rate", seeds=make_seeds(nli_vals, "nli_support_rate")))
     abl = AblationResult(component="retrieval", ablated_element="dense index removed (BM25 only vs RRF)", full_system_metric=all_metrics[2].mean, ablated_metric=all_metrics[0].mean, metric_name="precision@" + str(K))
-    record = ExperimentRecord(experiment_id="exp_001_bronze", date=datetime.now(timezone.utc), component="full_pipeline_bronze", hypothesis="Bronze pipeline achieves support_rate > 60% and hallucination = 0%.", config={"corpus": 530, "chunks": 1613, "claims": 6052, "k_eval": K, "embed": "MiniLM-L6-v2", "nli": "deberta-v3-small"}, dataset_split=SplitType.TRAIN, results=all_metrics, ablations=[], error_analysis_count=0, notes="Bronze tier. Pseudo-relevance judgements. Citation graph empty (arXiv 2026 coverage gap).")
+    record = ExperimentRecord(experiment_id="exp_001_bronze", date=datetime.now(timezone.utc), component="full_pipeline_bronze", hypothesis="Bronze pipeline achieves support_rate > 60% and hallucination = 0%.", config={"corpus": 1500, "chunks": 4062, "claims": 14495, "k_eval": K, "embed": "MiniLM-L6-v2", "nli": "deberta-v3-small"}, dataset_split=SplitType.TRAIN, results=all_metrics, ablations=[], error_analysis_count=0, notes="Bronze tier. Pseudo-relevance judgements. Citation graph: 7009 internal edges (NLP concept C204321447, 2019-2025).")
     experiments_log.parent.mkdir(parents=True, exist_ok=True)
     with experiments_log.open("a", encoding="utf-8") as f:
         f.write(record.model_dump_json() + "\n")
@@ -85,7 +85,9 @@ def run_evaluation():
     for m in all_metrics:
         print("  " + m.component_name.ljust(28) + m.metric_name.ljust(24) + str(round(m.mean, 3)).rjust(6) + "  " + str(round(m.std, 3)).rjust(6))
     print("=" * 65)
-    print("\n  ABLATION: RRF vs BM25 | delta P@5 = " + str(round(abl.delta, 3)) + " (" + ("RRF improves" if abl.delta >= 0 else "RRF degrades") + ")")
+    print("\n  ABLATION: RRF vs BM25 | delta P@5 = " + str(round(abl.delta, 3)) + " (" + ("dense component helps" if abl.delta < 0 else "dense component hurts") + ")")
 
 if __name__ == "__main__":
     run_evaluation()
+
+
