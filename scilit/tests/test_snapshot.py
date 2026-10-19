@@ -7,7 +7,6 @@ from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 from pydantic import ValidationError
-
 from scilit.corpus.snapshot import (
     SnapshotError,
     SnapshotFile,
