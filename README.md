@@ -30,6 +30,7 @@ Python 3.10 or newer is required.
    ```
 
    Interactive API docs: `http://127.0.0.1:8000/docs` (adjust the host/port to your `.env`).
+   SciLit user interface: `http://127.0.0.1:8000/ui`.
 
 ## Environment variables
 
@@ -57,6 +58,16 @@ By default, SciLit expects its corpus and indexes under `data/raw/` and `data/pa
 - A comparison between RAG and NLP is rejected with a clarification prompt because RAG is a technique within NLP.
 
 NLI outputs are automatic indicators, not scientific certification. SciLit reports NLI-supported, no-support, contradicted, unresolved-reference, and unverifiable cases separately. It checks only claims explicitly linked to the cited article; it does not use arbitrary article chunks as substitute evidence. Sentences without citations are excluded from citation support rates.
+
+### French and Arabic queries
+
+The original query is retained in the review. For French or Arabic queries, SciLit also creates an English translation locally with an open Helsinki-NLP/OPUS-MT model, then searches with both the original and translated query and merges their results. The translation model is downloaded from Hugging Face on first use if it is not already cached; query text is not sent to a translation API. Override the model IDs with `SCILIT_TRANSLATION_MODEL_FR` or `SCILIT_TRANSLATION_MODEL_AR`. If loading or translation fails, SciLit logs that fact and continues with the original query rather than bypassing evidence checks.
+
+Query-term matching recognizes Arabic script, French accents, and English technical terms. A translated query can improve retrieval and claim relevance, but it cannot create source evidence: claims still need to match the retrieved article and current chunk text verbatim.
+
+### Generation diagnostics
+
+Each generation writes a structured `generation_stages` log entry with the detected language, translation status, result counts per query variant, retrieved chunks/articles, claim links, complete claims, verbatim source matches, relevance passes, and data-consistency mismatches. Retrieval also logs index metadata checks against current `chunks.jsonl` (unknown chunk IDs, article-ID mismatches, and text-preview mismatches). An insufficient-evidence response includes the key stage counts, suggests increasing top-k where possible, and points to the mismatch counters. SciLit does not rebuild the corpus or indexes automatically.
 
 ## Frozen retrieval evaluation
 

@@ -47,9 +47,42 @@ def _chunk_lookup() -> dict[str, dict]:
     """chunk_id str → {text, section_type} pour enrichir les RankedResult."""
     log.info("Chargement chunks pour lookup texte...")
     return {
-        str(c.id): {"text": c.text, "section_type": c.section_type}
+        str(c.id): {
+            "text": c.text,
+            "section_type": c.section_type,
+            "article_id": str(c.article_id),
+        }
         for c in load_chunks()
     }
+
+
+def _log_index_consistency(name: str, index, lookup: dict[str, dict]) -> None:
+    """Compare index metadata with current chunks without rebuilding either."""
+    metadata = getattr(index, "_meta", [])
+    unknown_ids = 0
+    article_mismatches = 0
+    text_mismatches = 0
+    for item in metadata:
+        chunk_id = str(item.get("chunk_id", ""))
+        current = lookup.get(chunk_id)
+        if current is None:
+            unknown_ids += 1
+            continue
+        if str(item.get("article_id", "")) != current["article_id"]:
+            article_mismatches += 1
+        indexed_preview = item.get("text")
+        if indexed_preview is not None and indexed_preview != current["text"][:300]:
+            text_mismatches += 1
+    log.info(
+        "index_consistency index=%s entries=%d current_chunks=%d "
+        "unknown_chunk_ids=%d article_id_mismatches=%d text_preview_mismatches=%d",
+        name,
+        len(metadata),
+        len(lookup),
+        unknown_ids,
+        article_mismatches,
+        text_mismatches,
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -83,6 +116,10 @@ def search(
                     if mode in ("bm25", "rrf") else []
     dense_results = _dense().search(query, k=dense_pool if mode == "rrf" else k) \
                     if mode in ("dense", "rrf") else []
+    if mode in ("bm25", "rrf"):
+        _log_index_consistency("bm25", _bm25(), lookup)
+    if mode in ("dense", "rrf"):
+        _log_index_consistency("dense", _dense(), lookup)
 
     # ── Helpers d'enrichissement ────────────────────────────────────────────
     def _enrich(r: RankedResult) -> RankedResult:

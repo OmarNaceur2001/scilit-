@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import re
 import unicodedata
 from functools import lru_cache
@@ -79,6 +80,132 @@ _QUERY_STOPWORDS = {
     "versus", "what", "which", "with", "within", "between", "better", "difference",
 }
 
+_QUERY_STOPWORDS.update({
+    # French function words and common comparison terms (accents are folded).
+    "au", "aux", "ce", "ces", "dans", "de", "des", "du", "elle", "en",
+    "entre", "est", "et", "la", "le", "les", "leur", "mais", "par", "pas",
+    "pour", "que", "qui", "sur", "un", "une",
+    # Arabic function and comparison words (Arabic diacritics are removed).
+    "هذا", "هذه", "ذلك", "التي", "الذي", "الى", "الي", "على", "عن", "بين",
+    "في", "من", "ماذا", "مقارنة", "مقارنه", "مقابل", "ضد",
+})
+
+_ARABIC_CHAR = re.compile(r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]")
+_ARABIC_MARKS = re.compile(r"[\u064b-\u065f\u0670\u0640]")
+_CONTENT_TOKEN = re.compile(
+    r"[^\W_]+(?:[\u064b-\u065f\u0670\u0640][^\W_]+)*",
+    flags=re.UNICODE,
+)
+_FRENCH_HINTS = {
+    "avec", "sans", "dans", "pour", "entre", "contre", "et", "faible",
+    "faibles", "ressource", "ressources", "complet", "complete", "complets",
+    "completes", "comparaison", "compare", "donnees", "resultats", "etude",
+    "apprentissage", "limitees", "limite",
+}
+_OPEN_TRANSLATION_MODELS = {
+    "fr": "Helsinki-NLP/opus-mt-fr-en",
+    "ar": "Helsinki-NLP/opus-mt-ar-en",
+}
+_RRF_QUERY_CONSTANT = 60
+
+
+def _normalise_token(token: str) -> str:
+    token = unicodedata.normalize("NFKC", token).casefold()
+    token = _ARABIC_MARKS.sub("", token)
+    token = token.translate(
+        str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ى": "ي"})
+    )
+    return "".join(
+        char
+        for char in unicodedata.normalize("NFKD", token)
+        if not unicodedata.combining(char)
+    )
+
+
+def _content_terms(text: str) -> set[str]:
+    """Extract normalized Latin, Arabic, and numeric tokens."""
+    return {
+        normalized
+        for token in _CONTENT_TOKEN.findall(text or "")
+        if (normalized := _normalise_token(token))
+    }
+
+
+def _query_language(query: str) -> str:
+    """Conservative script/keyword detection for English, French, or Arabic."""
+    if _ARABIC_CHAR.search(query):
+        return "ar"
+    terms = _content_terms(query)
+    accented_latin = re.search(r"[À-ÖØ-öø-ÿ]", query)
+    if accented_latin or terms & _FRENCH_HINTS:
+        return "fr"
+    return "en"
+
+
+@lru_cache(maxsize=4)
+def _load_query_translator(language: str, model_name: str):
+    """Load an open Transformers translation pipeline on first FR/AR query."""
+    from transformers import pipeline
+
+    return pipeline(
+        "translation",
+        model=model_name,
+        tokenizer=model_name,
+        device=-1,
+    )
+
+
+def _parallel_english_query(query: str, language: str) -> tuple[str | None, str]:
+    """Translate FR/AR queries locally so English paper indexes remain searchable."""
+    if language not in _OPEN_TRANSLATION_MODELS:
+        return None, "not-needed"
+    env_name = f"SCILIT_TRANSLATION_MODEL_{language.upper()}"
+    model_name = os.environ.get(env_name, _OPEN_TRANSLATION_MODELS[language]).strip()
+    try:
+        translated = _load_query_translator(language, model_name)(
+            query,
+            max_length=256,
+            truncation=True,
+        )
+        english = str(translated[0].get("translation_text", "")).strip()
+        if not english:
+            return None, "empty-translation"
+        return english, f"available:{model_name}"
+    except Exception as exc:
+        log.warning(
+            "query_translation_unavailable language=%s model=%s error=%s",
+            language,
+            model_name,
+            type(exc).__name__,
+        )
+        return None, f"unavailable:{type(exc).__name__}"
+
+
+def _merge_query_retrievals(result_groups, k: int):
+    """Fuse native and English-parallel query results by reciprocal rank."""
+    merged: dict[str, dict] = {}
+    for results in result_groups:
+        for result in results:
+            chunk_id = str(result.chunk_id)
+            item = merged.setdefault(
+                chunk_id,
+                {"result": result, "score": 0.0, "best_rank": result.final_rank},
+            )
+            item["score"] += 1.0 / (_RRF_QUERY_CONSTANT + result.final_rank)
+            if result.final_rank < item["best_rank"]:
+                item["result"] = result
+                item["best_rank"] = result.final_rank
+    ordered = sorted(
+        merged.values(),
+        key=lambda item: (-item["score"], str(item["result"].chunk_id)),
+    )[:k]
+    return [
+        item["result"].model_copy(
+            update={"final_rank": rank, "rrf_score": item["score"]}
+        )
+        for rank, item in enumerate(ordered, start=1)
+    ]
+
 
 def _comparison_clarification(query: str) -> str | None:
     """Explain that RAG and NLP are different levels of abstraction."""
@@ -100,7 +227,8 @@ def _comparison_clarification(query: str) -> str | None:
 
 def _query_terms(query: str) -> set[str]:
     return {
-        token for token in re.findall(r"[a-z0-9]+", query.lower())
+        token
+        for token in _content_terms(query)
         if len(token) > 1 and token not in _QUERY_STOPWORDS
     }
 
@@ -109,8 +237,22 @@ def _comparison_sides(
     query: str,
 ) -> tuple[tuple[str, set[str]], tuple[str, set[str]]] | None:
     """Extract explicit sides of a versus/against query for evidence coverage."""
+    arabic_between = re.search(
+        r"مقارنة\s+بين\s+(.+?)\s+و\s+(.+)",
+        query,
+        flags=re.IGNORECASE,
+    )
+    if arabic_between is not None:
+        left_label, right_label = arabic_between.groups()
+        left_terms = _query_terms(left_label)
+        right_terms = _query_terms(right_label)
+        if left_terms and right_terms:
+            return (left_label, left_terms), (right_label, right_terms)
+
     connector = re.search(
-        r"\b(?:vs|versus|against|contre|compared\s+(?:to|with))\.?(?=\s|$)",
+        r"\b(?:vs|versus|against|contre|face\s+(?:à|a)|"
+        r"comparé(?:e|s|es)?\s+(?:à|a)|compared\s+(?:to|with)|"
+        r"between|مقابل|ضد)\.?(?=\s|$)",
         query,
         flags=re.IGNORECASE,
     )
@@ -126,27 +268,46 @@ def _comparison_sides(
 
 
 def _source_covers_side(source_text: str, side_terms: set[str]) -> bool:
-    source_terms = set(re.findall(r"[a-z0-9]+", source_text.lower()))
+    source_terms = _content_terms(source_text)
     return bool(source_terms & side_terms)
 
 
-def _claim_relevance(query: str, claim_text: str, article_title: str) -> tuple[bool, float]:
+def _claim_relevance(
+    query: str,
+    claim_text: str,
+    article_title: str,
+    parallel_query: str | None = None,
+) -> tuple[bool, float]:
     """Conservative lexical reranking of a claim against the research query.
 
     The claim itself must share at least one query term. Article-title matches
     can add context, but cannot make a completely unrelated claim pass alone.
+    Original-language and optional English-parallel terms are scored separately,
+    so untranslated function words do not dilute matches in English claims.
     """
-    terms = _query_terms(query)
-    if not terms:
-        return False, 0.0
-    claim_terms = set(re.findall(r"[a-z0-9]+", claim_text.lower()))
-    title_terms = set(re.findall(r"[a-z0-9]+", article_title.lower()))
-    claim_hits = terms & claim_terms
-    all_hits = claim_hits | (terms & title_terms)
-    minimum_hits = 1 if len(terms) <= 3 else 2
-    relevant = bool(claim_hits) and len(all_hits) >= minimum_hits
-    score = (len(claim_hits) + 0.25 * len((terms & title_terms) - claim_hits)) / len(terms)
-    return relevant, score
+    variants = [query]
+    if parallel_query and parallel_query.casefold() != query.casefold():
+        variants.append(parallel_query)
+    claim_terms = _content_terms(claim_text)
+    title_terms = _content_terms(article_title)
+    best_score = 0.0
+    is_relevant = False
+    for variant in variants:
+        terms = _query_terms(variant)
+        if not terms:
+            continue
+        claim_hits = terms & claim_terms
+        title_hits = terms & title_terms
+        all_hits = claim_hits | title_hits
+        minimum_hits = 1 if len(terms) <= 3 else 2
+        variant_relevant = bool(claim_hits) and len(all_hits) >= minimum_hits
+        score = (
+            len(claim_hits) + 0.25 * len(title_hits - claim_hits)
+        ) / len(terms)
+        if score > best_score:
+            best_score = score
+        is_relevant = is_relevant or variant_relevant
+    return is_relevant, best_score
 
 
 def _is_complete_source_claim(text: str) -> bool:
@@ -523,6 +684,34 @@ def _count_rendered_claims_by_type(
     return counts
 
 
+def _log_generation_diagnostics(diagnostics: dict) -> None:
+    """Emit stage counts without logging source passages or full claims."""
+    log.info(
+        "generation_stages %s",
+        json.dumps(diagnostics, ensure_ascii=False, sort_keys=True),
+    )
+
+
+def _comparison_terms_for_query(
+    query: str,
+    english_query: str | None,
+    language: str,
+) -> tuple[tuple[str, set[str]], tuple[str, set[str]]] | None:
+    """Prefer translated comparison sides; translate each side if parsing failed."""
+    translated_sides = _comparison_sides(english_query or "")
+    if translated_sides:
+        return translated_sides
+    original_sides = _comparison_sides(query)
+    if original_sides is None or language not in _OPEN_TRANSLATION_MODELS:
+        return original_sides
+
+    translated: list[tuple[str, set[str]]] = []
+    for label, terms in original_sides:
+        english_label, _ = _parallel_english_query(label, language)
+        translated.append((label, terms | _query_terms(english_label or "")))
+    return translated[0], translated[1]
+
+
 def generate(
     query:                  str,
     k:                      int = config.DEFAULT_TOP_K,
@@ -534,44 +723,180 @@ def generate(
     Retourne (draft, bibtex_entries) pour que le CLI puisse
     sauvegarder et afficher séparément.
     """
-    clarification = _comparison_clarification(query)
+    query_language = _query_language(query)
+    english_query, translation_status = _parallel_english_query(
+        query, query_language
+    )
+    clarification = _comparison_clarification(query) or _comparison_clarification(
+        english_query or ""
+    )
     if clarification:
         raise QueryClarificationRequired(clarification)
 
     articles_db = _load_articles()
     all_claims  = _load_claims()
     query_id    = uuid4()
+    diagnostics = {
+        "query_language": query_language,
+        "translation": translation_status,
+        "top_k": k,
+        "retrieval_queries": [],
+        "retrieved_chunks": 0,
+        "retrieved_articles": 0,
+        "consistency": {
+            "retrieved_chunks_missing_from_chunks_jsonl": 0,
+            "retrieved_article_mismatches": 0,
+            "retrieved_text_mismatches": 0,
+            "claims_missing_from_chunks_jsonl": 0,
+            "claims_article_mismatches": 0,
+            "claims_missing_from_articles_jsonl": 0,
+        },
+        "claims": {
+            "total": len(all_claims),
+            "linked_to_retrieval": 0,
+            "missing_id": 0,
+            "article_mismatch": 0,
+            "article_missing": 0,
+            "missing_chunk_metadata": 0,
+            "retrieved_chunk_inconsistent": 0,
+            "empty_source_text": 0,
+            "incomplete": 0,
+            "complete": 0,
+            "not_verbatim_in_chunk": 0,
+            "verbatim_in_chunk": 0,
+            "irrelevant": 0,
+            "relevant": 0,
+        },
+    }
 
     # ── 1. Retrieval ─────────────────────────────────────────────────────────
-    log.info("Retrieval RRF : '%s' (k=%d)...", query, k)
-    ranked = retrieve(query, k=k, mode=config.RETRIEVAL_MODE)
+    query_variants = [("original", query)]
+    if english_query and english_query.casefold() != query.casefold():
+        query_variants.append(("english_parallel", english_query))
+    log.info(
+        "retrieval_start language=%s variants=%d mode=%s top_k=%d",
+        query_language,
+        len(query_variants),
+        config.RETRIEVAL_MODE,
+        k,
+    )
+    result_groups = []
+    retrieval_errors = []
+    for variant_name, search_query in query_variants:
+        try:
+            variant_results = retrieve(
+                search_query,
+                k=k,
+                mode=config.RETRIEVAL_MODE,
+            )
+            result_groups.append(variant_results)
+            diagnostics["retrieval_queries"].append({
+                "variant": variant_name,
+                "result_count": len(variant_results),
+            })
+        except Exception as exc:
+            retrieval_errors.append(exc)
+            diagnostics["retrieval_queries"].append({
+                "variant": variant_name,
+                "result_count": 0,
+                "error": type(exc).__name__,
+            })
+            log.exception("retrieval_failed variant=%s", variant_name)
+    if not result_groups and retrieval_errors:
+        _log_generation_diagnostics(diagnostics)
+        raise retrieval_errors[0]
+    ranked = (
+        result_groups[0]
+        if len(result_groups) == 1
+        else _merge_query_retrievals(result_groups, k)
+    )
+    diagnostics["retrieved_chunks"] = len({str(r.chunk_id) for r in ranked})
+    diagnostics["retrieved_articles"] = len({str(r.article_id) for r in ranked})
     if not ranked:
-        raise InsufficientRelevantEvidence(f"No retrieval results for query: {query!r}")
+        _log_generation_diagnostics(diagnostics)
+        details = (
+            f"language={query_language}, top_k={k}, translation={translation_status}; "
+            f"retrieval_queries={diagnostics['retrieval_queries']}"
+        )
+        raise InsufficientRelevantEvidence(
+            "No retrieval results were returned (" + details + "). "
+            "If this is an Arabic/French query, check the local translation model; "
+            "otherwise inspect the retrieval index and try a larger top-k."
+        )
 
     ranked_by_chunk = {
         str(result.chunk_id): result
         for result in ranked
     }
     chunk_metadata = _load_chunk_metadata()
+    for claim in all_claims:
+        claim_chunk_id = str(claim.get("chunk_id") or "")
+        current_claim_chunk = chunk_metadata.get(claim_chunk_id)
+        if current_claim_chunk is None:
+            diagnostics["consistency"]["claims_missing_from_chunks_jsonl"] += 1
+        elif str(current_claim_chunk.get("article_id", "")) != str(
+            claim.get("article_id", "")
+        ):
+            diagnostics["consistency"]["claims_article_mismatches"] += 1
+        if str(claim.get("article_id") or "") not in articles_db:
+            diagnostics["consistency"]["claims_missing_from_articles_jsonl"] += 1
+    stale_chunk_ids: set[str] = set()
+    for chunk_id, result in ranked_by_chunk.items():
+        current_chunk = chunk_metadata.get(chunk_id)
+        if current_chunk is None:
+            diagnostics["consistency"][
+                "retrieved_chunks_missing_from_chunks_jsonl"
+            ] += 1
+            stale_chunk_ids.add(chunk_id)
+            continue
+        if str(current_chunk.get("article_id", "")) != str(result.article_id):
+            diagnostics["consistency"]["retrieved_article_mismatches"] += 1
+            stale_chunk_ids.add(chunk_id)
+        if (result.chunk_text or "") != str(current_chunk.get("text") or ""):
+            diagnostics["consistency"]["retrieved_text_mismatches"] += 1
+            stale_chunk_ids.add(chunk_id)
     log.info(
-        "  %d chunks depuis %d articles.",
-        len(ranked_by_chunk), len({str(r.article_id) for r in ranked}),
+        "retrieval_complete chunks=%d articles=%d",
+        diagnostics["retrieved_chunks"],
+        diagnostics["retrieved_articles"],
     )
 
     # ── 2. Filter claims, not merely their parent retrieval chunks ────────────
     relevant: list[dict] = []
+    claim_counts = diagnostics["claims"]
     for claim in all_claims:
         chunk_id = str(claim.get("chunk_id") or "")
         result = ranked_by_chunk.get(chunk_id)
-        if result is None or not claim.get("id"):
+        if result is None:
+            continue
+        claim_counts["linked_to_retrieval"] += 1
+        if not claim.get("id"):
+            claim_counts["missing_id"] += 1
             continue
         article_id = str(claim.get("article_id") or "")
-        if article_id != str(result.article_id) or article_id not in articles_db:
+        if article_id != str(result.article_id):
+            claim_counts["article_mismatch"] += 1
+            continue
+        if article_id not in articles_db:
+            claim_counts["article_missing"] += 1
+            continue
+        current_chunk = chunk_metadata.get(chunk_id)
+        if current_chunk is None:
+            claim_counts["missing_chunk_metadata"] += 1
+            continue
+        if chunk_id in stale_chunk_ids:
+            claim_counts["retrieved_chunk_inconsistent"] += 1
             continue
         source_text = (claim.get("verbatim") or claim.get("text") or "").strip()
-        if not _is_complete_source_claim(source_text):
+        if not source_text:
+            claim_counts["empty_source_text"] += 1
             continue
-        chunk_text = result.chunk_text or ""
+        if not _is_complete_source_claim(source_text):
+            claim_counts["incomplete"] += 1
+            continue
+        claim_counts["complete"] += 1
+        # Current chunks.jsonl is the evidence source; reject stale retrieval text.
+        chunk_text = str(current_chunk.get("text") or "")
         stored_start = claim.get("char_start")
         stored_end = claim.get("char_end")
         if (
@@ -585,11 +910,20 @@ def generate(
         if local_start < 0:
             # A claim that cannot be recovered verbatim from its retrieved chunk
             # has no auditable source span, so it cannot be cited.
+            claim_counts["not_verbatim_in_chunk"] += 1
             continue
+        claim_counts["verbatim_in_chunk"] += 1
         title = articles_db[article_id].get("title", "")
-        is_relevant, relevance_score = _claim_relevance(query, source_text, title)
+        is_relevant, relevance_score = _claim_relevance(
+            query,
+            source_text,
+            title,
+            parallel_query=english_query,
+        )
         if not is_relevant:
+            claim_counts["irrelevant"] += 1
             continue
+        claim_counts["relevant"] += 1
         relevant.append({
             **claim,
             "_source_text": source_text,
@@ -599,11 +933,35 @@ def generate(
             "_relevance_score": relevance_score,
             "_retrieval_rank": result.final_rank,
         })
-    log.info("  %d claims pass claim-level relevance and source-span checks.", len(relevant))
+    _log_generation_diagnostics(diagnostics)
     if not relevant:
+        hints = []
+        if translation_status.startswith("unavailable"):
+            hints.append(
+                "The free local translation model was unavailable; check network/cache "
+                "or configure SCILIT_TRANSLATION_MODEL_FR/AR."
+            )
+        if k < 50:
+            hints.append(f"Retry with a larger top-k (up to 50; current k={k}).")
+        if any(diagnostics["consistency"].values()):
+            hints.append(
+                "The counters show a retrieval/chunks.jsonl mismatch; compare the "
+                "index, chunks.jsonl, and claims.jsonl before rebuilding anything."
+            )
+        detail = (
+            f"retrieved={diagnostics['retrieved_chunks']}, "
+            f"linked_claims={claim_counts['linked_to_retrieval']}, "
+            f"complete={claim_counts['complete']}, "
+            f"verbatim={claim_counts['verbatim_in_chunk']}, "
+            f"relevant={claim_counts['relevant']}, "
+            f"language={query_language}, translation={translation_status}"
+        )
+        hint_text = " " + " ".join(hints) if hints else ""
         raise InsufficientRelevantEvidence(
-            "No complete, source-verifiable claims matched the query. "
-            "Try a more specific query or review the retrieved papers manually."
+            "No complete, source-verifiable claims matched the query after the "
+            f"recorded stages ({detail}). Check generation_stages in the API log. "
+            "Source verification remains enabled; review the retrieved papers manually."
+            + hint_text
         )
 
     by_type: dict[str, list[dict]] = {t: [] for t in SECTION_ORDER}
@@ -618,7 +976,11 @@ def generate(
     article_claim_counts: dict[str, int] = {}
     selected_type_counts: dict[str, int] = {}
     max_claims_per_article = 2
-    comparison_sides = _comparison_sides(query)
+    comparison_sides = _comparison_terms_for_query(
+        query,
+        english_query,
+        query_language,
+    )
 
     def _candidate_order(claim: dict) -> tuple[float, int, str]:
         return (
