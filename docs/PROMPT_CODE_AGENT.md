@@ -505,7 +505,103 @@ Le projet n’est acceptable que si :
 - README, cartes de données/modèles et journal d’expériences reflètent honnêtement ce qui a été réalisé ;
 - aucun résultat de test, annotation humaine ou référence n’a été inventé.
 
-## 23. Rapport final que tu dois fournir
+## 23. Exigences obligatoires du module NLP 2026-2027 — matrice de conformité
+
+Cette annexe transforme la fiche pédagogique du projet **P6 — SciLit** en contraintes vérifiables. Ces objectifs sont des exigences à atteindre, et non des affirmations selon lesquelles les données, annotations ou expériences existent déjà. Commence par mesurer l'état réel, puis consigne l'écart.
+
+### 23.1 Périmètre exact de SciLit
+
+Le parcours de bout en bout doit couvrir :
+
+1. Recherche d'articles pertinents, en priorité dans les sources ouvertes ACL Anthology et arXiv, sur une requête de recherche.
+2. Affichage clair des métadonnées et de la disponibilité du contenu : abstract seul, texte intégral analysé, ou accès/parse indisponible.
+3. Extraction structurée de la question de recherche, contribution, méthode, données, résultats et limites, avec provenance et extrait source.
+4. Classification de la fonction des citations et construction d'un graphe bibliographique lorsque les données sources le permettent. Ne présente jamais ce graphe comme une preuve textuelle de soutien.
+5. Tableau comparatif traçable des études et de leurs critères.
+6. État de l'art rédigé phrase par phrase, avec références vérifiées et accès au claim puis au passage justificatif.
+7. Questions posées en français ou en arabe sur des articles en anglais. Cette capacité doit être mesurée séparément par langue et ne doit pas être déclarée opérationnelle sur la seule base de l'existence d'un champ de langue.
+8. Application, API et export BibTeX fonctionnels.
+
+Le corpus cible du sujet est de **500 à 2 000 articles en accès ouvert**. Toute indisponibilité du texte intégral, licence inconnue ou extraction partielle doit être visible dans les résultats et les cartes de données.
+
+### 23.2 Contraintes académiques, modèles et assistance IA
+
+- Le système évalué ne doit dépendre d'aucune API payante. Une clé ou un service externe peut rester une intégration facultative, désactivée par défaut, sans casser le parcours Bronze.
+- Respecter les plafonds du module : modèles entraînés jusqu'à **1 milliard de paramètres** et modèles jusqu'à **8 milliards de paramètres quantifiés** pour l'inférence. Consigner taille, précision/quantification, source, licence et empreinte/version de chaque modèle.
+- Aucun test unitaire ne doit exiger Internet, une clé API ou le téléchargement d'un modèle. Utiliser des mocks et des fixtures reproductibles.
+- L'assistance IA pour le code, la relecture ou la reformulation doit être déclarée dans le rapport. Elle ne doit jamais servir à fabriquer des résultats, des références non lues ou des annotations présentées comme humaines.
+- Respecter la licence et les conditions de redistribution de chaque corpus. Ne publier que les éléments partageables et documenter les exclusions.
+
+### 23.3 Les cinq lots et leurs livrables
+
+Organise les tickets, les tests et la documentation selon les lots communs suivants. Dans un projet individuel ou une petite équipe, ces lots restent des axes de responsabilité et d'audit.
+
+| Lot | Périmètre SciLit | Livrables minimum |
+|---|---|---|
+| A — Données & langue | Collecte, provenance, parsing, normalisation, couverture linguistique, corpus et splits | Carte de données, guide de collecte/annotation, manifeste reproductible, statistiques et limites de couverture |
+| B — Analyse linguistique & sens | Sections, syntaxe utile, sémantique, hedging, ontologie des méthodes, coréférence si implémentée | Baselines par règles, exemples annotés, métriques d'extraction et analyse d'erreurs |
+| C — Modèles appris | Représentations, retrieval dense, extraction/classification apprise, transfert | Carte de modèle, expériences reproductibles, comparaison baseline classique/neuronale, trois graines si composant appris |
+| D — Génération & recherche | Retrieval, RAG, claims, evidence linking, revue et citations | Métriques de retrieval, tableau comparatif, état de l'art lié aux preuves, export BibTeX |
+| E — Évaluation, audit & intégration | Tests, API/UI, audit des citations, robustesse, biais, rapport | Tableau de bord ou rapport d'évaluation, audit, tests end-to-end et démonstration intégrée |
+
+Ne coche un livrable comme terminé que si un fichier, une commande, un test ou une preuve de démonstration le confirme.
+
+### 23.4 Protocole expérimental commun obligatoire
+
+Applique ces règles à SciLit ; explique explicitement toute impossibilité au lieu de simuler la conformité.
+
+- Geler le jeu de test lors de sa première constitution et sauvegarder les identifiants, critères d'inclusion, version et empreinte. Ne jamais l'utiliser pour choisir un hyperparamètre ou un seuil.
+- Pour chaque composant appris, comparer au moins une baseline classique (règles, TF-IDF, BM25 ou FastText + modèle linéaire selon la tâche) et une baseline neuronale pertinente. Pour le retrieval, BM25 est la baseline lexicale à conserver.
+- Pour tout composant appris, réaliser trois exécutions avec graines fixées et publier moyenne ± écart-type. Les scores doivent être calculés sur les mêmes exemples.
+- Utiliser un bootstrap apparié contre la baseline pour le résultat principal lorsque le volume de test le permet ; documenter la méthode, le nombre de réplications et l'intervalle rapporté.
+- Réaliser au moins une ablation par lot : retirer ou varier un composant identifiable (par exemple normalisation, type d'index, fusion, evidence linking ou contrôle de citation).
+- Fournir une analyse d'au moins 30 erreurs catégorisées par composant appris, à partir de sorties réellement observées. Les exemples synthétiques doivent être identifiés comme tels et ne remplacent pas des erreurs mesurées.
+- Rapporter séparément les résultats par langue et par script pour toute fonctionnalité multilingue, notamment les requêtes FR/AR sur des articles EN.
+- Reproduire un résultat publié avant la revue de mi-parcours : choisir un résultat réalisable, préciser la source, les données, les différences de protocole et les résultats effectivement obtenus.
+- Produire une carte de données et une carte de modèle pour chaque corpus/composant concerné.
+- Inclure une section « Limitations » couvrant cinq dimensions explicitement nommées et chiffrées lorsque c'est possible. La fiche du sujet ne nomme pas ces cinq dimensions : ne prétends pas qu'une liste arbitraire vient de l'enseignant ; vérifie la grille du module ou définis et justifie clairement les dimensions retenues.
+
+### 23.5 Cibles d'annotation pour la version académique
+
+Les chiffres ci-dessous sont les objectifs du sujet, pas des statistiques acquises du dépôt :
+
+- 200 articles annotés selon la grille : question, contribution, méthode, résultats et limites ;
+- 500 citations annotées selon leur fonction ;
+- 20 états de l'art de référence rédigés par les étudiants et validés par l'enseignant ;
+- accord inter-annotateurs mesuré sur un sous-ensemble doublement annoté, avec guide d'annotation et kappa adapté à la tâche.
+
+Si ces cibles ne sont pas atteintes, publier l'état réel, les écarts et le plan de réduction du risque. N'invente ni annotation, ni validation enseignante, ni valeur de kappa. Documenter les annotateurs, la procédure d'adjudication, les catégories, les désaccords et la version du dataset. Éviter les fuites entre train/dev/test au niveau article, doublon et quasi-doublon.
+
+### 23.6 Métriques minimales et question de recherche
+
+Les scripts et rapports d'évaluation doivent définir chaque métrique, son numérateur/dénominateur et le jeu précis auquel elle s'applique.
+
+- Retrieval : Recall@10 et MRR au minimum, avec comparaison BM25, dense et hybride sur un test identique.
+- Sections, claims et fonction de citation : précision/rappel et macro-F1 adaptés aux labels ; rapporter les erreurs de chaque classe.
+- Soutien des citations : séparer existence de la référence, attribution au bon article, soutien textuel, contradiction, non-vérifiabilité et couverture. Ne pas publier un taux « 0 % hallucination » lorsque le vérificateur n'a pas évalué les éléments.
+- Revue de littérature : grille humaine portant au minimum sur l'exactitude et la couverture, avec accord entre évaluateurs lorsqu'il est disponible.
+- Robustesse : tester reformulations, négations, nombres, hedging, données manquantes et divergences abstract/résultats.
+- Biais de couverture : distribution des sources, années, venues et articles effectivement accessibles.
+- Documenter latence et mémoire séparément de la qualité.
+
+Question de recherche recommandée, conforme au sujet : **la vérification des citations phrase par phrase réduit-elle les affirmations non soutenues ou les références inventées, et à quel coût en couverture ?** Comparer une baseline sans vérification systématique à la chaîne avec claims/preuves liés et audit par citation. Ne présuppose pas le résultat avant l'expérience.
+
+### 23.7 Jalons et critères de sortie
+
+- **Bronze — W7 :** pipeline de bout en bout opérationnel avec composants classiques, BM25, génération déterministe, tests de base, métriques par composant et démonstration.
+- **Silver — W10 :** retrieval dense/hybride et composants appris pertinents, questions FR/AR sur articles EN évaluées, trois graines, ablations et reproduction d'un résultat publié.
+- **Gold — W12 :** audit des références inventées/mal attribuées, couverture, biais, robustesse, contradictions, abstention et seuils de vérification validés par rapport à des annotations humaines.
+- **Platinum — W14 :** ressource publiable (jeu annoté, suite de tests ou charte), calibration justifiée, étude d'utilité réalisable et rapport au niveau d'un atelier, sans revendiquer de validation absente.
+
+À chaque jalon, la sortie obligatoire est une démo sur des entrées non préparées, un état des métriques réellement disponibles, les échecs connus et les prochaines priorités.
+
+### 23.8 Livrables finaux et barrière de validation
+
+Avant de déclarer SciLit prêt pour la soutenance, vérifier au minimum : application + API + export BibTeX ; corpus et licences documentés ; guide d'annotation, cartes de données/modèles et manifeste reproductible ; baseline classique et résultats des composants appris réellement exécutés ; tableau comparatif et revue traçables ; protocole et test gelé ; trois graines, ablations et bootstrap lorsque requis ; analyse d'erreurs ; journal `experiments.md` ; section Limitations ; rapport de 12–15 pages et vidéo de démonstration.
+
+Le barème du sujet doit guider la priorité : problématique/carte du système (3 points), données (3), composants classiques (4), composants appris et génératifs (5), multilingue/audit (4), intégration/démonstration (3), reproductibilité/rédaction (3). La soutenance valorise la démo de bout en bout, les résultats honnêtes, l'audit et la capacité à expliquer les limites. La conformité au barème ne se remplace pas par une liste de fonctionnalités annoncées.
+
+## 24. Rapport final que tu dois fournir
 
 À la fin, présente un rapport bref et factuel avec :
 
