@@ -7,7 +7,7 @@ Modèle  : cross-encoder/nli-deberta-v3-small (~180MB, CPU)
 Logique : premise = claim source → hypothesis = phrase générée
           entailment   → VERIFIED
           neutral      → EXISTS_NO_SUPPORT
-          contradiction → HALLUCINATED
+          contradiction → CONTRADICTED (the reference may still exist)
 
 Bronze : utilise les supporting_claim_ids du ReviewDraft.
          Si vide → status reste UNVERIFIABLE.
@@ -128,7 +128,7 @@ def _load_nli_model(model_name: str = NLI_MODEL):
     model.eval()
 
     id2label  = model.config.id2label          # {0: 'contradiction', 1: 'entailment', ...}
-    label2id  = {v.lower(): k for k, v in id2label.items()}
+    label2id  = {v.lower(): int(k) for k, v in id2label.items()}
     log.info("Labels NLI : %s", id2label)
     return tokenizer, model, label2id
 
@@ -167,7 +167,7 @@ def _run_nli(
     if entail_p >= ENTAIL_THRESHOLD:
         return VerificationStatus.VERIFIED, entail_p
     if contra_p >= CONTRA_THRESHOLD:
-        return VerificationStatus.HALLUCINATED, entail_p
+        return VerificationStatus.CONTRADICTED, entail_p
     return VerificationStatus.EXISTS_NO_SUPPORT, entail_p
 
 
@@ -201,53 +201,101 @@ def verify_review(
 
         statuses: list[VerificationStatus] = []
         notes: list[str] = []
-        max_entailment = 0.0
+        max_entailment: float | None = None
         for aid in sent.citations:
             aid_text = str(aid)
             article = articles_lookup.get(aid_text)
             if article is None:
-                status = VerificationStatus.HALLUCINATED
+                status = VerificationStatus.REFERENCE_UNRESOLVED
                 score = 0.0
                 note = "article_missing_from_corpus"
             else:
-                premises = []
+                matching_claims: list[dict] = []
+                missing_claim = False
+                invalid_evidence = False
                 for cid in sent.supporting_claim_ids:
                     claim = claims_lookup.get(str(cid))
-                    if isinstance(claim, str):
+                    if not claim:
+                        missing_claim = True
                         continue
-                    if claim and str(claim.get("article_id")) == aid_text:
-                        premises.append(claim.get("text", ""))
-                premises = [text for text in premises if text]
-                if not premises:
-                    premises = chunks_lookup.get(aid_text, [])[:MAX_PREMISES]
-                if not premises:
-                    status = VerificationStatus.EXISTS_NO_SUPPORT
-                    score = 0.0
-                    note = "no_article_claims_or_chunks"
+                    if isinstance(claim, str):
+                        # Legacy text-only records have no article association and
+                        # cannot safely verify which citation the claim belongs to.
+                        missing_claim = True
+                        continue
+                    if str(claim.get("article_id")) == aid_text:
+                        evidence_items = [
+                            item for item in sent.evidence
+                            if str(item.claim_id) == str(cid)
+                            and str(item.article_id) == aid_text
+                        ]
+                        if sent.evidence:
+                            source_text = (claim.get("verbatim") or claim.get("text") or "").strip()
+                            if not evidence_items or any(
+                                item.passage.strip() != source_text for item in evidence_items
+                            ):
+                                invalid_evidence = True
+                                continue
+                        matching_claims.append(claim)
+
+                if not sent.supporting_claim_ids:
+                    status = VerificationStatus.UNVERIFIABLE
+                    score = None
+                    note = "no_claim_level_evidence_attached"
+                elif invalid_evidence:
+                    status = VerificationStatus.UNVERIFIABLE
+                    score = None
+                    note = "evidence_passage_does_not_match_source_claim"
+                elif not matching_claims:
+                    if missing_claim:
+                        status = VerificationStatus.UNVERIFIABLE
+                        note = "supporting_claim_missing_or_unattributed"
+                    else:
+                        status = VerificationStatus.EXISTS_NO_SUPPORT
+                        note = "supporting_claim_belongs_to_another_article"
+                    score = None
                 else:
-                    score = 0.0
-                    contradicted = False
-                    status = VerificationStatus.EXISTS_NO_SUPPORT
-                    for premise in premises[:MAX_PREMISES]:
-                        candidate_status, entailment = run_nli(premise, sent.text)
-                        score = max(score, entailment)
-                        if candidate_status == VerificationStatus.VERIFIED:
-                            status = VerificationStatus.VERIFIED
-                        contradicted |= candidate_status == VerificationStatus.HALLUCINATED
-                    note = "contradicted" if contradicted and status != VerificationStatus.VERIFIED else "no_entailment"
-                    if score >= ENTAIL_THRESHOLD:
+                    scores: list[float] = []
+                    candidate_statuses: list[VerificationStatus] = []
+                    error_notes: list[str] = []
+                    for claim in matching_claims[:MAX_PREMISES]:
+                        premise = (claim.get("verbatim") or claim.get("text") or "").strip()
+                        if not premise:
+                            error_notes.append("source_claim_text_empty")
+                            continue
+                        try:
+                            candidate_status, entailment = run_nli(premise, sent.text)
+                        except Exception as exc:
+                            log.exception("NLI failed for claim %s", claim.get("id"))
+                            error_notes.append(f"nli_error:{type(exc).__name__}")
+                            continue
+                        candidate_statuses.append(candidate_status)
+                        scores.append(float(entailment))
+
+                    score = max(scores) if scores else None
+                    if VerificationStatus.VERIFIED in candidate_statuses:
                         status = VerificationStatus.VERIFIED
-                        note = "entailment_threshold_met"
+                        note = "automatic_nli_entailment_indicator"
+                    elif VerificationStatus.CONTRADICTED in candidate_statuses:
+                        status = VerificationStatus.CONTRADICTED
+                        note = "automatic_nli_contradiction_indicator"
+                    elif VerificationStatus.EXISTS_NO_SUPPORT in candidate_statuses:
+                        status = VerificationStatus.EXISTS_NO_SUPPORT
+                        note = "automatic_nli_no_support_indicator"
+                    else:
+                        status = VerificationStatus.UNVERIFIABLE
+                        note = ";".join(error_notes) or "no_nli_verdict"
             statuses.append(status)
             notes.append(note)
-            max_entailment = max(max_entailment, score)
+            if score is not None:
+                max_entailment = score if max_entailment is None else max(max_entailment, score)
             audit_entries.append(HallucinationAuditEntry(
                 review_id=draft.id,
                 sentence_text=sent.text[:200],
                 cited_key=_bibtex_key(article) if article else aid_text[:8],
                 status=status,
                 auditor="auto_nli",
-                note=f"{note} | nli_entail={score:.4f}",
+                note=(f"{note} | entailment_probability={score:.4f}" if score is not None else note),
             ))
 
         updated_sentences.append(VerifiedSentence(
@@ -255,7 +303,8 @@ def verify_review(
             citations=sent.citations,
             verification_statuses=statuses,
             supporting_claim_ids=sent.supporting_claim_ids,
-            nli_score=round(max_entailment, 4),
+            nli_score=round(max_entailment, 4) if max_entailment is not None else None,
+            evidence=sent.evidence,
         ))
 
     # ── Reconstruire le ReviewDraft ─────────────────────────────────────────
@@ -295,14 +344,39 @@ def _save(draft: ReviewDraft, audit: HallucinationAudit, slug: str) -> None:
 
 
 def _print_stats(draft: ReviewDraft, audit: HallucinationAudit) -> None:
+    nli_statuses = {
+        VerificationStatus.VERIFIED,
+        VerificationStatus.EXISTS_NO_SUPPORT,
+        VerificationStatus.CONTRADICTED,
+    }
+    nli_verdicts = sum(1 for entry in audit.entries if entry.status in nli_statuses)
+    contradicted = sum(
+        1 for entry in audit.entries if entry.status == VerificationStatus.CONTRADICTED
+    )
+    unsupported = sum(
+        1 for entry in audit.entries if entry.status == VerificationStatus.EXISTS_NO_SUPPORT
+    )
+    unverifiable = sum(
+        1 for entry in audit.entries if entry.status == VerificationStatus.UNVERIFIABLE
+    )
+    unresolved = sum(
+        1 for entry in audit.entries
+        if entry.status == VerificationStatus.REFERENCE_UNRESOLVED
+    )
+    legacy_ambiguous = sum(
+        1 for entry in audit.entries if entry.status == VerificationStatus.HALLUCINATED
+    )
     print(f"\n{'='*65}")
     print(f"  NLI AUDIT : {draft.title}")
-    print(f"  Phrases           : {len(draft.sentences)}")
-    print(f"  Hallucination     : {draft.overall_hallucination_rate:.1%}")
-    print(f"  Support rate      : {draft.overall_support_rate:.1%}")
-    print(f"  Audit entries     : {len(audit.entries)}")
-    print(f"  Invented rate     : {audit.invented_rate:.1%}")
-    print(f"  Soutenu rate      : {audit.support_rate:.1%}")
+    print(f"  Citation checks   : {len(audit.entries)} citations")
+    print(f"  NLI verdicts      : {nli_verdicts}/{len(audit.entries)}")
+    print(f"  NLI support       : {sum(e.status == VerificationStatus.VERIFIED for e in audit.entries)}/{nli_verdicts}")
+    print(f"  Contradicted      : {contradicted}")
+    print(f"  No support        : {unsupported}")
+    print(f"  Unverifiable      : {unverifiable}")
+    print(f"  Ref. not in corpus: {unresolved}")
+    print(f"  Legacy ambiguous  : {legacy_ambiguous}")
+    print("  NLI values are automatic indicators, not scientific certification.")
     print(f"{'='*65}")
     for sent in draft.sentences:
         if not sent.verification_statuses:

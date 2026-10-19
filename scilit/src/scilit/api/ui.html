@@ -31,12 +31,18 @@
     .badge-green { background: #e8f5e9; color: #2e7d32; }
     .badge-blue { background: #e3f2fd; color: #1565c0; }
     .badge-orange { background: #fff3e0; color: #e65100; }
+    .badge-red { background: #ffebee; color: #c62828; }
+    .badge-grey { background: #eceff1; color: #546e7a; }
     .sentences { margin-top: 14px; }
     .sentence { padding: 12px 14px; border-left: 3px solid #e0e0e0; margin-bottom: 10px; border-radius: 0 6px 6px 0; background: #fafafa; font-size: 0.93rem; line-height: 1.55; }
     .sentence.verified { border-left-color: #4CAF50; background: #f1f8e9; }
     .sentence.unverifiable { border-left-color: #90a4ae; }
     .sentence.hallucinated { border-left-color: #f44336; background: #ffebee; }
     .sentence-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; color: #888; }
+    .verification-note, .evidence-missing { color: #667; font-size: 0.78rem; line-height: 1.45; margin-top: 8px; }
+    .evidence { margin-top: 10px; padding: 10px 12px; border: 1px solid #e2e7ec; border-radius: 6px; background: #fff; }
+    .evidence-meta { font-size: 0.78rem; color: #536273; margin-bottom: 6px; }
+    .evidence blockquote { border-left: 2px solid #9db4c7; padding-left: 10px; color: #34495e; font-size: 0.86rem; }
     .bib-btn { margin-top: 18px; }
     .search-results { margin-top: 14px; }
     .chunk { padding: 12px; background: #fafafa; border: 1px solid #eee; border-radius: 6px; margin-bottom: 8px; font-size: 0.88rem; }
@@ -165,35 +171,84 @@ async function doGenerate() {
 function renderReview(data, query) {
   document.getElementById('review-title').textContent = data.title || ('Revue : ' + query);
   const stats = document.getElementById('review-stats');
-  const halluPct = (data.hallucination_rate * 100).toFixed(0);
-  const suppPct  = (data.support_rate * 100).toFixed(0);
-  stats.innerHTML = `
+
+  const nCit        = data.n_citations ?? 0;
+  const nliVerdicts = data.n_nli_verdicts ?? 0;
+  const nliCoverage = data.nli_coverage ?? 0;
+  const nliSupportRate = data.nli_support_rate ?? 0;
+  const verified    = data.n_verified ?? 0;
+  const unsupported = data.n_unsupported ?? 0;
+  const contradicted = data.n_contradicted ?? 0;
+  const unresolved  = data.n_reference_unresolved ?? data.n_hallucinated ?? 0;
+  const legacyAmbiguous = data.n_reference_unresolved == null ? 0 : (data.n_hallucinated ?? 0);
+  const unverif     = data.n_unverifiable ?? 0;
+  const nliRan      = data.nli_ran === true;
+
+  let badges = `
     <span class="badge badge-blue">${data.n_sentences} phrases</span>
     <span class="badge badge-blue">${data.n_bibtex} références</span>
-    <span class="badge badge-green">✓ ${suppPct}% vérifiées</span>
-    <span class="badge ${halluPct>0?'badge-orange':'badge-green'}">⚠ ${halluPct}% hallucinées</span>`;
+    <span class="badge badge-blue">${nCit} citations</span>`;
+
+  if (!nliRan) {
+    badges += `
+      <span class="badge badge-grey">⏹ Indicateurs NLI indisponibles</span>
+      <span class="badge badge-grey">${unverif} non vérifiables</span>`;
+  } else if (nliVerdicts === 0) {
+    badges += `
+      <span class="badge badge-grey">⚠ Aucun verdict NLI calculable</span>
+      <span class="badge badge-grey">${unverif} non vérifiables</span>`;
+  } else {
+    const covPct  = Math.round(nliCoverage * 100);
+    const suppPct = Math.round(nliSupportRate * 100);
+    badges += `
+      <span class="badge badge-blue">🔎 Verdicts NLI : ${nliVerdicts}/${nCit} citations (${covPct}%)</span>
+      <span class="badge badge-green">NLI indique un soutien : ${verified}/${nliVerdicts} (${suppPct}%)</span>`;
+    if (unsupported > 0)
+      badges += `<span class="badge badge-orange">${unsupported} sans soutien détecté</span>`;
+    if (contradicted > 0)
+      badges += `<span class="badge badge-red">${contradicted} contradictions détectées</span>`;
+    if (unresolved > 0)
+      badges += `<span class="badge badge-red">${unresolved} référence(s) introuvable(s) dans le corpus</span>`;
+    if (legacyAmbiguous > 0)
+      badges += `<span class="badge badge-grey">${legacyAmbiguous} ancien(s) statut(s) ambigu(s) à réexaminer</span>`;
+    if (unverif > 0)
+      badges += `<span class="badge badge-grey">${unverif} non vérifiables</span>`;
+  }
+  const uncited = data.n_sentences_without_citations ?? 0;
+  const note = data.verification_note || 'Les phrases sans citation sont exclues des statistiques de soutien.';
+  stats.innerHTML = badges + `<p class="verification-note">${escHtml(note)} ${uncited} phrase(s) sans citation, exclue(s) des statistiques.</p>`;
 
   const slug = data.slug || slugify(query);
   currentSlug = slug;
 
-  fetch(`${API}/review/${slug}_verified`)
-    .then(r => r.ok ? r.json() : fetch(`${API}/review/${slug}`).then(r2=>r2.json()))
-    .then(rev => {
-      const container = document.getElementById('sentences');
-      container.innerHTML = '';
-      (rev.sentences||[]).forEach((s,i) => {
+  const container = document.getElementById('sentences');
+  container.innerHTML = '';
+  (data.sentences||[]).forEach(s => {
         const st = (s.verification_statuses||[])[0] || 'unverifiable';
-        const nli = s.nli_score != null ? ` · NLI=${(s.nli_score*100).toFixed(0)}%` : '';
-        const cls = st === 'verified' ? 'verified' : st === 'hallucinated' ? 'hallucinated' : 'unverifiable';
+        const labels = {
+          verified: 'NLI indique un soutien (automatique)',
+          exists_no_support: 'Soutien non détecté',
+          contradicted: 'Contradiction détectée automatiquement',
+          reference_unresolved: 'Référence introuvable dans le corpus local',
+          hallucinated: 'Ancien statut ambigu — source à réexaminer',
+          unverifiable: 'Non vérifiable automatiquement'
+        };
+        const nli = s.nli_score != null ? ` · probabilité d’implication NLI ${Math.round(s.nli_score*100)}%` : '';
+        const cls = st === 'verified' ? 'verified' : (st === 'hallucinated' || st === 'reference_unresolved' || st === 'contradicted') ? 'hallucinated' : 'unverifiable';
+        const evidence = (s.evidence||[]).map(ev => {
+          const href = safeHttpUrl(ev.source_url);
+          const title = escHtml(ev.article_title || 'Article source');
+          const articleLink = href ? `<a href="${escHtml(href)}" target="_blank" rel="noopener noreferrer">${title}</a>` : title;
+          const offset = Number.isInteger(ev.section_char_start) ? ` · offset dans la section ${ev.section_char_start}–${ev.section_char_end}` : '';
+          return `<div class="evidence"><div class="evidence-meta">Preuve source : ${articleLink}${offset}</div><blockquote>${escHtml(ev.passage)}</blockquote></div>`;
+        }).join('');
         container.innerHTML += `<div class="sentence ${cls}">
-          <div class="sentence-label">${st}${nli}</div>
+          <div class="sentence-label">${escHtml(labels[st] || st)}${nli}</div>
           ${escHtml(s.text)}
+          ${!evidence && (s.supporting_claim_ids||[]).length ? '<div class="evidence-missing">Extrait exact absent de cette ancienne revue sauvegardée ; régénérez-la avec la version actuelle pour afficher la preuve.</div>' : ''}
+          ${s.nli_score != null ? '<div class="evidence-missing">Le score NLI est un indicateur automatique non validé comme certification scientifique.</div>' : ''}
         </div>`;
-      });
-    })
-    .catch(() => {
-      document.getElementById('sentences').innerHTML = `<p style="color:#888">Chargement du contenu...</p>`;
-    });
+  });
 }
 
 function renderSearch(data) {
@@ -222,6 +277,13 @@ async function downloadBib() {
 
 function escHtml(s) {
   return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function safeHttpUrl(value) {
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : null;
+  } catch (_) { return null; }
 }
 
 document.getElementById('query').addEventListener('keydown', e => {

@@ -19,17 +19,17 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
-from pathlib import Path
-from fastapi.responses import HTMLResponse
-
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from scilit import config
+from scilit.schemas import ReviewDraft, VerifiedSentence
 
 log = logging.getLogger(__name__)
 
@@ -127,9 +127,38 @@ class GenerateResponse(BaseModel):
     title:                   str
     n_sentences:             int
     n_bibtex:                int
-    hallucination_rate:      float
+    hallucination_rate:      float = Field(
+        description="Legacy saved-review rate; use n_reference_unresolved for current runs."
+    )
     support_rate:            float
-    overall_hallucination_rate: float
+    overall_hallucination_rate: float = Field(
+        description="Legacy saved-review rate; NLI cannot certify invented citations."
+    )
+    # RD-01: explicit per-state accounting so the UI cannot advertise a clean
+    # result while hiding unsupported or unevaluated claims.
+    n_citations:             int
+    n_verified:              int
+    n_unsupported:           int
+    n_contradicted:          int
+    n_hallucinated:          int = Field(
+        description="Legacy ambiguous status count; use n_reference_unresolved for current runs."
+    )
+    n_unverifiable:          int
+    n_reference_unresolved:  int
+    n_nli_verdicts:          int
+    nli_coverage:            float
+    nli_support_rate:        float
+    n_evaluated:             int
+    verification_coverage:   float = Field(
+        description="Legacy all-determinations coverage; nli_coverage is NLI-specific."
+    )
+    evaluated_support_rate:  float = Field(
+        description="Legacy support denominator; nli_support_rate is NLI-specific."
+    )
+    n_sentences_without_citations: int
+    nli_ran:                 bool
+    verification_note:       str | None = None
+    sentences:               list[VerifiedSentence]
     review_path:             str
     audit_path:              str | None
 
@@ -246,11 +275,55 @@ def export_articles_bibtex(ids: str = Query(..., description="Comma-separated ar
     return "\n\n".join(entry.to_bibtex() for entry in entries)
 
 
+def _build_generate_response(
+    draft: ReviewDraft,
+    slug: str,
+    n_bibtex: int,
+    review_path: str,
+    audit_path: str | None,
+    verification_note: str | None = None,
+) -> GenerateResponse:
+    return GenerateResponse(
+        slug                       = slug,
+        title                      = draft.title,
+        n_sentences                = len(draft.sentences),
+        n_bibtex                   = n_bibtex,
+        hallucination_rate         = draft.overall_hallucination_rate,
+        support_rate               = draft.overall_support_rate,
+        overall_hallucination_rate = draft.overall_hallucination_rate,
+        n_citations                = draft.n_citations,
+        n_verified                 = draft.n_verified,
+        n_unsupported              = draft.n_unsupported,
+        n_contradicted             = draft.n_contradicted,
+        n_hallucinated             = draft.n_hallucinated,
+        n_unverifiable             = draft.n_unverifiable,
+        n_reference_unresolved     = draft.n_reference_unresolved,
+        n_nli_verdicts             = draft.n_nli_verdicts,
+        nli_coverage               = draft.nli_coverage,
+        nli_support_rate           = draft.nli_support_rate,
+        n_evaluated                = draft.n_evaluated,
+        verification_coverage      = draft.verification_coverage,
+        evaluated_support_rate     = draft.evaluated_support_rate,
+        n_sentences_without_citations = draft.n_sentences_without_citations,
+        nli_ran                    = audit_path is not None,
+        verification_note          = verification_note,
+        sentences                  = draft.sentences,
+        review_path                = review_path,
+        audit_path                 = audit_path,
+    )
+
+
 @app.post("/generate", response_model=GenerateResponse, summary="Génération + NLI")
 def generate(req: GenerateRequest):
 
-    from scilit.generation.template import _slugify
-    from scilit.generation.template import generate as gen_fn
+    from scilit.generation.template import (
+        InsufficientRelevantEvidence,
+        QueryClarificationRequired,
+        _slugify,
+    )
+    from scilit.generation.template import (
+        generate as gen_fn,
+    )
 
     try:
         draft, bibtex = gen_fn(
@@ -258,6 +331,8 @@ def generate(req: GenerateRequest):
             k                      = req.k,
             max_sentences_per_type = req.max_sentences_per_type,
         )
+    except (QueryClarificationRequired, InsufficientRelevantEvidence) as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -277,6 +352,7 @@ def generate(req: GenerateRequest):
     )
 
     audit_path: str | None = None
+    verification_note: str | None = None
 
     # ── NLI optionnelle ───────────────────────────────────────────────────
     if req.run_nli:
@@ -300,28 +376,63 @@ def generate(req: GenerateRequest):
             audit_path = str(reviews_dir / f"{slug}_audit.json")
         except Exception as e:
             log.warning("NLI skipped : %s", e)
+            verification_note = (
+                "Automatic NLI indicators are unavailable for this review. "
+                f"Reason: {type(e).__name__}. No citation is marked as supported."
+            )
+    else:
+        verification_note = "NLI verification was not requested."
+    if audit_path is not None:
+        verification_note = (
+            "Automatic NLI indicators were computed. They are not human-validated "
+            "scientific certification."
+        )
 
-    return GenerateResponse(
-        slug                     = slug,
-        title                    = draft.title,
-        n_sentences              = len(draft.sentences),
-        n_bibtex                 = len(bibtex),
-        hallucination_rate       = draft.overall_hallucination_rate,
-        support_rate             = draft.overall_support_rate,
-        overall_hallucination_rate = draft.overall_hallucination_rate,
-        review_path              = str(review_path),
-        audit_path               = audit_path,
+    return _build_generate_response(
+        draft       = draft,
+        slug        = slug,
+        n_bibtex    = len(bibtex),
+        review_path = str(review_path),
+        audit_path  = audit_path,
+        verification_note = verification_note,
     )
 
 
 @app.get("/review/{slug}", summary="Lire un ReviewDraft sauvegardé")
 def get_review(slug: str):
     reviews_dir = config.paths().reviews
-    # Prefer _verified if it exists
-    for suffix in ("_verified", ""):
-        path = reviews_dir / f"{slug}{suffix}.json"
-        if path.exists():
-            return json.loads(path.read_text(encoding="utf-8"))
+    candidates = []
+    for is_verified, path in (
+        (False, reviews_dir / f"{slug}.json"),
+        (True, reviews_dir / f"{slug}_verified.json"),
+    ):
+        if not path.exists():
+            continue
+        try:
+            review = json.loads(path.read_text(encoding="utf-8"))
+            generated_at = datetime.fromisoformat(
+                str(review.get("generated_at", "")).replace("Z", "+00:00")
+            ).timestamp()
+        except (ValueError, TypeError, json.JSONDecodeError):
+            generated_at = path.stat().st_mtime
+            review = json.loads(path.read_text(encoding="utf-8"))
+        candidates.append((generated_at, is_verified, review))
+    if candidates:
+        # A previous NLI run must never shadow a newer, unverified generation.
+        review = max(candidates, key=lambda item: (item[0], item[1]))[2]
+        claim_sentences = [
+            sentence for sentence in review.get("sentences", [])
+            if sentence.get("supporting_claim_ids")
+        ]
+        if claim_sentences and not all(sentence.get("evidence") for sentence in claim_sentences):
+            review["evidence_complete"] = False
+            review["evidence_warning"] = (
+                "This saved review predates embedded exact source passages. "
+                "Its historical NLI labels are not current scientific verification."
+            )
+        else:
+            review["evidence_complete"] = True
+        return review
     raise HTTPException(status_code=404, detail=f"Review '{slug}' introuvable.")
 
 

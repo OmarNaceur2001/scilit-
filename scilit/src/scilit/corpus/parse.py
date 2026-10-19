@@ -81,6 +81,63 @@ SECTION_PATTERNS: list[tuple[re.Pattern, SectionType]] = [
 
 log = logging.getLogger(__name__)
 
+
+def resolve_full_text_mode(
+    mode: str | None,
+    full_text_mode: bool | None,
+) -> bool:
+    """Resolve the legacy mode and explicit full-text flag consistently."""
+    if mode not in (None, "abstract", "pdf"):
+        raise ValueError("mode must be 'abstract' or 'pdf'")
+
+    legacy_full_text = None if mode is None else mode == "pdf"
+    if (
+        legacy_full_text is not None
+        and full_text_mode is not None
+        and legacy_full_text != full_text_mode
+    ):
+        raise ValueError(
+            "--mode and --full-text-mode specify conflicting parsing modes"
+        )
+
+    if full_text_mode is not None:
+        return full_text_mode
+    return legacy_full_text if legacy_full_text is not None else False
+
+
+def build_argument_parser(input_default: Path | None = None) -> argparse.ArgumentParser:
+    """Build the parser CLI while retaining the original --mode interface."""
+    parser = argparse.ArgumentParser(description="SciLit -- parsing articles")
+    parser.add_argument(
+        "--mode",
+        choices=["abstract", "pdf"],
+        default=None,
+        help="Legacy mode selector: abstract (default) or pdf (full text)",
+    )
+    parser.add_argument(
+        "--full-text-mode",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Explicitly select full-text PDF parsing (use --no-full-text-mode for abstracts)",
+    )
+    parser.add_argument(
+        "--max",
+        type=int,
+        default=None,
+        help="Nb max d'articles a traiter (default: tous)",
+    )
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=input_default,
+        help=(
+            f"Chemin vers articles.jsonl (default: {input_default})"
+            if input_default is not None
+            else "Chemin vers articles.jsonl (default: configuration SciLit)"
+        ),
+    )
+    return parser
+
 # =============================================================================
 # CHUNKING
 # =============================================================================
@@ -108,16 +165,27 @@ def chunk_text(
     while start < n:
         end = min(start + size, n)
 
-        # Chercher la fin de phrase la plus proche avant 'end'
+        # Prefer a sentence boundary. If none is nearby, stop at a word boundary
+        # so a long sentence cannot be cut in the middle of a token.
         if end < n:
-            # Cherche un '.' ou '\n' dans les 100 derniers chars
-            boundary = text.rfind(".", start + size - 100, end)
-            if boundary == -1:
-                boundary = text.rfind("\n", start + size - 100, end)
+            lower_bound = max(start + 1, end - 100)
+            boundary = max(
+                text.rfind(mark, lower_bound, end)
+                for mark in (".", "!", "?", "\n")
+            )
             if boundary != -1:
                 end = boundary + 1
+            else:
+                word_boundary = text.rfind(" ", lower_bound, end)
+                if word_boundary > start:
+                    end = word_boundary
 
-        fragment = text[start:end].strip()
+        raw_fragment = text[start:end]
+        left_trim = len(raw_fragment) - len(raw_fragment.lstrip())
+        right_trimmed = raw_fragment.rstrip()
+        fragment = right_trimmed[left_trim:]
+        fragment_start = start + left_trim
+        fragment_end = start + len(right_trimmed)
 
         if len(fragment) >= 30:   # ignorer les fragments trop courts
             chunks.append(Chunk(
@@ -126,15 +194,24 @@ def chunk_text(
                 section_id=section_id,
                 section_type=section_type,
                 text=fragment,
-                char_start=start,
-                char_end=end,
+                char_start=fragment_start,
+                char_end=fragment_end,
                 chunk_index=idx,
                 token_count=len(fragment) // 4,   # estimation
             ))
             idx += 1
 
-        # Avancer avec overlap
+        # Avancer avec overlap on a word boundary. The first sentence of an
+        # overlapping chunk is discarded by claim extraction when it starts
+        # inside a section; the preceding chunk owns that passage.
         next_start = end - overlap
+        while (
+            next_start < end
+            and next_start > start
+            and not text[next_start - 1].isspace()
+            and not text[next_start].isspace()
+        ):
+            next_start += 1
         if next_start <= start:
             next_start = start + max(size - overlap, 1)
         start = next_start
@@ -204,6 +281,7 @@ def run_bronze(
         log.info(f"Bronze : {len(done_ids)} articles deja traites, reprise...")
 
     total_s = total_c = 0
+    processed = failed = skipped = 0
     mode_s  = "a" if sections_path.exists() else "w"
     mode_c  = "a" if chunks_path.exists()   else "w"
 
@@ -213,9 +291,14 @@ def run_bronze(
     ):
         for article in tqdm(articles, desc="Bronze parse", unit="art", ncols=80):
             if str(article.id) in done_ids:
+                skipped += 1
                 continue
 
             sections, chunks = parse_abstract(article)
+            if sections:
+                processed += 1
+            else:
+                failed += 1
 
             for s in sections:
                 fs.write(s.model_dump_json() + "\n")
@@ -225,6 +308,18 @@ def run_bronze(
                 fc.write(c.model_dump_json(exclude={"embedding"}) + "\n")
                 total_c += 1
 
+    log.info(
+        "Parse summary: requested_mode=abstract effective_mode=abstract "
+        "input_articles=%d processed_abstract=%d processed_full_text=0 "
+        "failed=%d skipped_existing=%d skipped_no_pdf=0 "
+        "sections=%d chunks=%d",
+        len(articles),
+        processed,
+        failed,
+        skipped,
+        total_s,
+        total_c,
+    )
     return total_s, total_c
 
 # =============================================================================
@@ -242,23 +337,37 @@ def _pdf_url_for(article: Article) -> str | None:
 
 def _download_pdf(url: str, dest: Path) -> bool:
     """Telecharge un PDF dans dest. Retourne True si reussi."""
-    if dest.exists() and dest.stat().st_size > 1000:
-        return True
     try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists():
+            cached_size = dest.stat().st_size
+            if 1000 < cached_size <= MAX_PDF_SIZE:
+                return True
+            if cached_size > MAX_PDF_SIZE:
+                log.warning("Cached PDF exceeds size limit and was discarded: %s", dest)
+                dest.unlink(missing_ok=True)
+                return False
+        dest.unlink(missing_ok=True)
         r = requests.get(url, timeout=PDF_TIMEOUT, stream=True)
         r.raise_for_status()
         size = 0
+        too_large = False
         with open(dest, "wb") as f:
             for chunk in r.iter_content(chunk_size=65536):
+                if not chunk:
+                    continue
+                if size + len(chunk) > MAX_PDF_SIZE:
+                    too_large = True
+                    break
                 f.write(chunk)
                 size += len(chunk)
-                if size > MAX_PDF_SIZE:
-                    log.warning(f"PDF trop grand (> 20 MB), abandon : {url}")
-                    dest.unlink(missing_ok=True)
-                    return False
+        if too_large:
+            log.warning("PDF exceeds size limit; download discarded: %s", url)
+            dest.unlink(missing_ok=True)
+            return False
         return True
     except Exception as e:
-        log.debug(f"Telechargement PDF echoue ({url}): {e}")
+        log.warning("PDF download failed (%s): %s", url, e)
         dest.unlink(missing_ok=True)
         return False
 
@@ -294,19 +403,22 @@ def _extract_sections_pymupdf(pdf_path: Path, article: Article) -> list[Section]
 
     # ── Extraire les blocs avec leur taille de police ──────────────────────
     blocks_by_font: list[tuple[float, str]] = []  # (font_size, text)
-    for page in doc:
-        blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_LIGATURES)["blocks"]
-        for block in blocks:
-            if block.get("type") != 0:   # 0 = text block
-                continue
-            for line in block.get("lines", []):
-                for span in line.get("spans", []):
-                    text = span.get("text", "").strip()
-                    size = span.get("size", 0)
-                    if text:
-                        blocks_by_font.append((size, text))
-
-    doc.close()
+    try:
+        for page in doc:
+            blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_LIGATURES)[
+                "blocks"
+            ]
+            for block in blocks:
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        text = span.get("text", "").strip()
+                        size = span.get("size", 0)
+                        if text:
+                            blocks_by_font.append((size, text))
+    finally:
+        doc.close()
 
     if not blocks_by_font:
         return []
@@ -359,21 +471,6 @@ def _extract_sections_pymupdf(pdf_path: Path, article: Article) -> list[Section]
 
     _flush(char_pos)
 
-    # Fallback : si aucune section detectee, abstract uniquement
-    if not sections:
-        abstract = article.abstract.strip()
-        if abstract:
-            sections.append(Section(
-                id=uuid5(article.id, "section:0"),
-                article_id=article.id,
-                section_type=SectionType.ABSTRACT,
-                title="Abstract",
-                text=abstract,
-                char_start=0,
-                char_end=len(abstract),
-                section_index=0,
-            ))
-
     return sections
 
 
@@ -392,56 +489,101 @@ def run_silver(
     chunks_path = chunks_path or paths.parsed / "chunks.jsonl"
     sections_path.parent.mkdir(parents=True, exist_ok=True)
     chunks_path.parent.mkdir(parents=True, exist_ok=True)
-    log.info(f"Silver : traitement de {min(max_articles, len(articles))} articles...")
-    total_s = total_c = downloaded = failed = 0
+    selected = articles[:max_articles]
+    log.info(
+        "Starting full-text parsing: input_articles=%d selected_articles=%d",
+        len(articles),
+        len(selected),
+    )
+    total_s = total_c = pdf_available = processed = failed = skipped_no_pdf = 0
 
     mode_s = "a" if sections_path.exists() else "w"
-    mode_c = "a" if chunks_path.exists()   else "w"
+    mode_c = "a" if chunks_path.exists() else "w"
 
     with (
         open(sections_path, mode_s, encoding="utf-8") as fs,
-        open(chunks_path,   mode_c, encoding="utf-8") as fc,
+        open(chunks_path, mode_c, encoding="utf-8") as fc,
     ):
-        for article in tqdm(articles[:max_articles], desc="Silver PDF", ncols=80):
+        for article in tqdm(selected, desc="Full-text PDF", ncols=80):
             pdf_url = _pdf_url_for(article)
             if not pdf_url:
-                # Fallback Bronze
-                sections, chunks = parse_abstract(article)
-            else:
-                safe_name = article.corpus_id + ".pdf"
-                pdf_path = paths.raw / "pdfs" / safe_name
-                pdf_path.parent.mkdir(parents=True, exist_ok=True)
+                skipped_no_pdf += 1
+                log.warning(
+                    "Full-text skipped: article_id=%s reason=no_pdf_url",
+                    article.id,
+                )
+                continue
 
-                ok = _download_pdf(pdf_url, pdf_path)
-                if ok:
-                    downloaded += 1
-                    sections = _extract_sections_pymupdf(pdf_path, article)
-                    if not sections:
-                        sections, _ = parse_abstract(article)
-                else:
+            pdf_path = paths.raw / "pdfs" / f"{article.corpus_id}.pdf"
+            try:
+                if not _download_pdf(pdf_url, pdf_path):
                     failed += 1
-                    sections, _ = parse_abstract(article)
+                    log.error(
+                        "Full-text failed: article_id=%s reason=pdf_download_failed",
+                        article.id,
+                    )
+                    continue
 
+                pdf_available += 1
+                sections = _extract_sections_pymupdf(pdf_path, article)
+                if not sections:
+                    failed += 1
+                    pdf_path.unlink(missing_ok=True)
+                    log.error(
+                        "Full-text failed: article_id=%s reason=no_extractable_sections",
+                        article.id,
+                    )
+                    continue
+
+                processed += 1
+                log.info(
+                    "Full-text processed: article_id=%s sections=%d",
+                    article.id,
+                    len(sections),
+                )
+            except Exception:
+                failed += 1
+                pdf_path.unlink(missing_ok=True)
+                log.exception(
+                    "Full-text failed: article_id=%s reason=extraction_error",
+                    article.id,
+                )
+                continue
+            finally:
                 time.sleep(PDF_DELAY)
 
-            # Chunks depuis chaque section
             chunks: list[Chunk] = []
-            for s in sections:
-                chunks.extend(chunk_text(
-                    text=s.text,
-                    article_id=article.id,
-                    section_id=s.id,
-                    section_type=s.section_type,
-                ))
+            for section in sections:
+                chunks.extend(
+                    chunk_text(
+                        text=section.text,
+                        article_id=article.id,
+                        section_id=section.id,
+                        section_type=section.section_type,
+                    )
+                )
 
-            for s in sections:
-                fs.write(s.model_dump_json() + "\n")
+            for section in sections:
+                fs.write(section.model_dump_json() + "\n")
                 total_s += 1
-            for c in chunks:
-                fc.write(c.model_dump_json(exclude={"embedding"}) + "\n")
+            for chunk in chunks:
+                fc.write(chunk.model_dump_json(exclude={"embedding"}) + "\n")
                 total_c += 1
 
-    log.info(f"Silver : PDF ok={downloaded} echec={failed}")
+    log.info(
+        "Parse summary: requested_mode=full_text effective_mode=full_text "
+        "input_articles=%d selected_articles=%d processed_abstract=0 "
+        "processed_full_text=%d failed=%d skipped_no_pdf=%d "
+        "pdf_available=%d sections=%d chunks=%d",
+        len(articles),
+        len(selected),
+        processed,
+        failed,
+        skipped_no_pdf,
+        pdf_available,
+        total_s,
+        total_c,
+    )
     return total_s, total_c
 
 # =============================================================================
@@ -498,7 +640,8 @@ def print_stats(sections_path: Path, chunks_path: Path) -> None:
     articles    = len({str(s.article_id) for s in sections})
 
     print(f"\n{'='*55}")
-    print(f"  PARSING : {articles} articles traites")
+    print("  EXISTING AGGREGATE OUTPUT (may contain prior runs/modes)")
+    print(f"  Articles with sections : {articles}")
     print(f"  Sections : {len(sections)} | Chunks : {len(chunks)}")
     print(f"  Tokens estimes : {token_total:,}")
     print(f"  Types sections : {sec_types}")
@@ -510,44 +653,46 @@ def print_stats(sections_path: Path, chunks_path: Path) -> None:
 # CLI
 # =============================================================================
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     paths = config.paths()
     config.setup_logging(paths.parsed / "parse_log.txt")
-    p = argparse.ArgumentParser(description="SciLit -- parsing articles")
-    p.add_argument(
-        "--mode",
-        choices=["abstract", "pdf"],
-        default="abstract",
-        help="abstract = Bronze (rapide) | pdf = Silver (PyMuPDF)",
-    )
-    p.add_argument(
-        "--max",
-        type=int,
-        default=None,
-        help="Nb max d'articles a traiter (default: tous)",
-    )
-    p.add_argument(
-        "--input",
-        type=Path,
-        default=None,
-        help=f"Chemin vers articles.jsonl (default: {paths.raw / 'articles.jsonl'})",
-    )
-    args = p.parse_args()
+    parser = build_argument_parser(paths.raw / "articles.jsonl")
+    args = parser.parse_args(argv)
+    try:
+        full_text_mode = resolve_full_text_mode(args.mode, args.full_text_mode)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     articles = load_articles(args.input)
     if not articles:
         print("Aucun article trouve. Lance d'abord : python -m scilit.corpus.collect")
         return
 
-    if args.max:
-        articles = articles[:args.max]
+    input_count = len(articles)
+    selected_articles = articles if args.max is None else articles[:args.max]
+    requested_mode = args.mode or (
+        "full_text"
+        if args.full_text_mode is True
+        else "abstract"
+        if args.full_text_mode is False
+        else "default"
+    )
+    effective_mode = "full_text" if full_text_mode else "abstract"
+    log.info(
+        "Parse request: requested_mode=%s full_text_mode_flag=%s "
+        "effective_mode=%s input_articles=%d selected_articles=%d",
+        requested_mode,
+        args.full_text_mode if args.full_text_mode is not None else "default",
+        effective_mode,
+        input_count,
+        len(selected_articles),
+    )
 
-    log.info(f"Mode : {args.mode} | Articles : {len(articles)}")
-
-    if args.mode == "abstract":
-        ns, nc = run_bronze(articles)
+    if not full_text_mode:
+        ns, nc = run_bronze(selected_articles)
     else:
-        ns, nc = run_silver(articles, max_articles=args.max or len(articles))
+        max_articles = args.max if args.max is not None else input_count
+        ns, nc = run_silver(articles, max_articles=max_articles)
 
     log.info(f"Sections sauvegardees : {ns} | Chunks : {nc}")
     print_stats(paths.parsed / "sections.jsonl", paths.parsed / "chunks.jsonl")

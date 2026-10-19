@@ -104,6 +104,13 @@ class LicenseFamily(str, Enum):
     UNKNOWN = "unknown"
 
 
+class PermissionOutcome(str, Enum):
+    PERMITTED = "permitted"
+    PROHIBITED = "prohibited"
+    CONDITIONAL = "conditional"
+    UNKNOWN = "unknown"
+
+
 class LicenseEvidence(str, Enum):
     OPENALEX = "openalex"
     ACL_POLICY = "acl_policy"
@@ -138,7 +145,9 @@ LICENSE_ID_FAMILY: dict[LicenseId, LicenseFamily] = {
     LicenseId.MIT: LicenseFamily.MIT,
 }
 
-OPENALEX_LICENSE_IDENTIFIERS: dict[str, tuple[LicenseFamily, LicenseId | None]] = {
+OPENALEX_LICENSE_IDENTIFIERS: dict[
+    str, tuple[LicenseFamily, LicenseId | None]
+] = {
     "cc-by": (LicenseFamily.CC_BY, None),
     "cc-by-4.0": (LicenseFamily.CC_BY, LicenseId.CC_BY_4),
     "cc-by-3.0": (LicenseFamily.CC_BY, LicenseId.CC_BY_3),
@@ -163,6 +172,8 @@ OPENALEX_LICENSE_IDENTIFIERS: dict[str, tuple[LicenseFamily, LicenseId | None]] 
     "apache-2.0": (LicenseFamily.APACHE_2, LicenseId.APACHE_2),
     "mit": (LicenseFamily.MIT, LicenseId.MIT),
     "all-rights-reserved": (LicenseFamily.ALL_RIGHTS_RESERVED, None),
+    "elsevier-user-license": (LicenseFamily.RESTRICTED, None),
+    "proprietary": (LicenseFamily.RESTRICTED, None),
     "restricted": (LicenseFamily.RESTRICTED, None),
 }
 
@@ -170,6 +181,7 @@ OPENALEX_LICENSE_IDENTIFIERS: dict[str, tuple[LicenseFamily, LicenseId | None]] 
 def normalize_license_identifier(
     raw: str | None,
 ) -> tuple[LicenseFamily, LicenseId | None]:
+    """Return a license family and an exact SPDX ID only when raw identifies it."""
     if not isinstance(raw, str):
         return LicenseFamily.UNKNOWN, None
     return OPENALEX_LICENSE_IDENTIFIERS.get(
@@ -242,7 +254,9 @@ class VerificationStatus(str, Enum):
     """
     VERIFIED = "verified"                   # article existe ET soutient la phrase
     EXISTS_NO_SUPPORT = "exists_no_support"  # article existe mais ne soutient pas
-    HALLUCINATED = "hallucinated"            # article introuvable dans le corpus
+    CONTRADICTED = "contradicted"            # source passage contradicts the sentence
+    REFERENCE_UNRESOLVED = "reference_unresolved"  # not found in this local corpus
+    HALLUCINATED = "hallucinated"            # legacy label; new runs must not assign it automatically
     UNVERIFIABLE = "unverifiable"            # hors corpus ou accès impossible
 
 
@@ -361,6 +375,284 @@ class ProvenanceRecord(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+class PermissionDecision(BaseModel):
+    """An activity outcome and any conditions attached to that permission."""
+
+    outcome: PermissionOutcome
+    conditions: list[str] = Field(default_factory=list)
+
+
+def _permission_profile(
+    family: LicenseFamily,
+) -> tuple[PermissionDecision, PermissionDecision, PermissionDecision]:
+    def conditional(conditions: list[str]) -> PermissionDecision:
+        return PermissionDecision(
+            outcome=PermissionOutcome.CONDITIONAL,
+            conditions=conditions,
+        )
+
+    unknown = PermissionDecision(outcome=PermissionOutcome.UNKNOWN)
+    prohibited = PermissionDecision(outcome=PermissionOutcome.PROHIBITED)
+    attribution = ["Attribution is required."]
+
+    if family in {LicenseFamily.CC_BY, LicenseFamily.CC_BY_SA, LicenseFamily.CC_BY_ND}:
+        redistribution_conditions = list(attribution)
+        if family == LicenseFamily.CC_BY_SA:
+            redistribution_conditions.append(
+                "Distributed adaptations must retain the applicable share-alike terms."
+            )
+        if family == LicenseFamily.CC_BY_ND:
+            redistribution_conditions.append(
+                "Adapted material may not be distributed under this license."
+            )
+        adaptations = PermissionDecision(
+            outcome=(
+                PermissionOutcome.PROHIBITED
+                if family == LicenseFamily.CC_BY_ND
+                else PermissionOutcome.CONDITIONAL
+            ),
+            conditions=(
+                attribution
+                + (["Distributed adaptations must use the same license terms."]
+                   if family == LicenseFamily.CC_BY_SA else [])
+                + (["The license does not permit distribution of adaptations."]
+                   if family == LicenseFamily.CC_BY_ND else [])
+            ),
+        )
+        return (
+            conditional(redistribution_conditions),
+            conditional(attribution),
+            adaptations,
+        )
+
+    if family in {
+        LicenseFamily.CC_BY_NC,
+        LicenseFamily.CC_BY_NC_SA,
+        LicenseFamily.CC_BY_NC_ND,
+    }:
+        noncommercial = ["Use must be noncommercial.", *attribution]
+        if family == LicenseFamily.CC_BY_NC_SA:
+            noncommercial.append(
+                "Distributed adaptations must use the same license terms."
+            )
+        if family == LicenseFamily.CC_BY_NC_ND:
+            noncommercial.append(
+                "The license does not permit distribution of adaptations."
+            )
+        adaptations = PermissionDecision(
+            outcome=(
+                PermissionOutcome.PROHIBITED
+                if family == LicenseFamily.CC_BY_NC_ND
+                else PermissionOutcome.CONDITIONAL
+            ),
+            conditions=noncommercial,
+        )
+        return (
+            PermissionDecision(
+                outcome=PermissionOutcome.CONDITIONAL,
+                conditions=noncommercial,
+            ),
+            PermissionDecision(outcome=PermissionOutcome.PROHIBITED),
+            adaptations,
+        )
+
+    if family in {LicenseFamily.CC0, LicenseFamily.PUBLIC_DOMAIN}:
+        permitted = PermissionDecision(outcome=PermissionOutcome.PERMITTED)
+        return permitted, permitted, permitted
+
+    if family in {LicenseFamily.APACHE_2, LicenseFamily.MIT}:
+        notice = ["Retain the applicable copyright and license notices."]
+        conditional = PermissionDecision(
+            outcome=PermissionOutcome.CONDITIONAL,
+            conditions=notice,
+        )
+        return conditional, conditional, conditional
+
+    if family == LicenseFamily.ALL_RIGHTS_RESERVED:
+        return prohibited, prohibited, prohibited
+    return unknown, unknown, unknown
+
+
+class LicenseInfo(BaseModel):
+    """A normalized license, its evidence, and separate reuse outcomes."""
+
+    spdx_id: LicenseId | None = None
+    family: LicenseFamily = LicenseFamily.UNKNOWN
+    raw_string: str | None = None
+    source_url: str | None = None
+    evidence: LicenseEvidence = LicenseEvidence.UNKNOWN
+    inference_source: str | None = None
+    policy_conflict: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_license_record(cls, value: Any) -> Any:
+        """Load prior string/structured records without retaining guessed versions."""
+        if isinstance(value, str):
+            return {
+                "raw_string": value,
+                "family": LicenseFamily.UNKNOWN,
+                "evidence": LicenseEvidence.UNKNOWN,
+            }
+        if not isinstance(value, dict):
+            return value
+
+        data = dict(value)
+        raw = data.get("raw_string")
+        if isinstance(raw, str):
+            family, spdx_id = normalize_license_identifier(raw)
+            data["family"] = family
+            data["spdx_id"] = spdx_id
+            data["evidence"] = (
+                LicenseEvidence.OPENALEX
+                if family != LicenseFamily.UNKNOWN
+                else LicenseEvidence.UNKNOWN
+            )
+            data["inference_source"] = None
+            return data
+
+        raw_spdx = data.get("spdx_id")
+        try:
+            spdx_id = LicenseId(raw_spdx) if raw_spdx is not None else None
+        except ValueError:
+            spdx_id = None
+        if raw_spdx is not None and spdx_id is None:
+            data["spdx_id"] = None
+            if raw_spdx == "restricted":
+                data.setdefault("family", LicenseFamily.RESTRICTED)
+            else:
+                data.setdefault("family", LicenseFamily.UNKNOWN)
+
+        inference_source = data.get("inference_source")
+        if inference_source:
+            if spdx_id is not None:
+                data["spdx_id"] = spdx_id
+                data.setdefault("family", LICENSE_ID_FAMILY[spdx_id])
+            data.setdefault("evidence", LicenseEvidence.ACL_POLICY)
+            return data
+
+        source_url = data.get("source_url")
+        try:
+            source_host = (urlsplit(source_url).hostname or "").lower()
+        except (TypeError, ValueError):
+            source_host = ""
+        if source_host == "aclanthology.org" or source_host.endswith(
+            ".aclanthology.org"
+        ):
+            # Previous releases inferred CC BY-4.0 from host alone. That lacks
+            # enough evidence to retain either an exact version or permission.
+            data["spdx_id"] = None
+            data["family"] = LicenseFamily.UNKNOWN
+            data["evidence"] = LicenseEvidence.UNKNOWN
+            data["inference_source"] = None
+            return data
+
+        if spdx_id is not None:
+            data["spdx_id"] = spdx_id
+            data.setdefault("family", LICENSE_ID_FAMILY[spdx_id])
+        data.setdefault("evidence", LicenseEvidence.UNKNOWN)
+        return data
+
+    @computed_field
+    @property
+    def is_verified(self) -> bool:
+        """Whether a recognized license family has explicit or policy evidence."""
+        return (
+            self.family != LicenseFamily.UNKNOWN
+            and self.evidence in {LicenseEvidence.OPENALEX, LicenseEvidence.ACL_POLICY}
+            and self.policy_conflict is None
+        )
+
+    @computed_field
+    @property
+    def redistribution(self) -> PermissionDecision:
+        return _permission_profile(self.family)[0]
+
+    @computed_field
+    @property
+    def commercial_use(self) -> PermissionDecision:
+        return _permission_profile(self.family)[1]
+
+    @computed_field
+    @property
+    def adaptations(self) -> PermissionDecision:
+        return _permission_profile(self.family)[2]
+
+
+def normalize_doi_identifier(value: str | None) -> str | None:
+    """Normalize DOI URLs and prefixes to a case-insensitive bare identifier."""
+    if not isinstance(value, str):
+        return None
+    doi = value.strip()
+    if not doi:
+        return None
+    if doi.lower().startswith("doi:"):
+        doi = doi[4:].strip()
+    try:
+        parsed = urlsplit(doi)
+    except ValueError:
+        parsed = None
+    if parsed and parsed.scheme.lower() in {"http", "https"} and (
+        parsed.hostname or ""
+    ).lower() in {"doi.org", "dx.doi.org"}:
+        doi = parsed.path.lstrip("/")
+    return doi.lower() or None
+
+
+class ProvenanceLocation(BaseModel):
+    """Evidence for one OpenAlex copy; its URLs and license stay together."""
+
+    location_id: str | None = None
+    landing_page_url: HttpUrl | None = None
+    pdf_url: HttpUrl | None = None
+    version: str | None = None
+    license: LicenseInfo | None = None
+    roles: list[ProvenanceRole] = Field(default_factory=list)
+
+    @field_validator("roles")
+    @classmethod
+    def reject_duplicate_roles(cls, value: list[ProvenanceRole]) -> list[ProvenanceRole]:
+        if len(value) != len(set(value)):
+            raise ValueError("a provenance location cannot repeat a role")
+        return value
+
+
+class ProvenanceRecord(BaseModel):
+    """OpenAlex work-level provenance with independently described locations.
+
+    Non-null identifiers, URLs, and version values come directly from the
+    provider; missing optional fields remain None. LicenseInfo.evidence
+    distinguishes explicit license metadata, policy inference, and unavailable
+    evidence.
+    """
+
+    provider: ProvenanceProvider
+    provider_record_id: str | None = None
+    canonical_record_url: HttpUrl | None = None
+    doi: str | None = None
+    retrieved_at: datetime
+    locations: list[ProvenanceLocation] = Field(default_factory=list)
+
+    @field_validator("doi")
+    @classmethod
+    def normalize_doi(cls, value: str | None) -> str | None:
+        return normalize_doi_identifier(value)
+
+    @field_validator("retrieved_at")
+    @classmethod
+    def require_aware_utc_timestamp(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("retrieved_at must be timezone-aware")
+        return value.astimezone(timezone.utc)
+
+    @model_validator(mode="after")
+    def reject_multiple_selected_locations(self) -> ProvenanceRecord:
+        for role in ProvenanceRole:
+            if sum(role in location.roles for location in self.locations) > 1:
+                raise ValueError(f"only one location may have the {role.value} role")
+        return self
+
+
 class ArticleSource(BaseModel):
     """
     Provenance, accès et licence d'un article.
@@ -379,6 +671,7 @@ class ArticleSource(BaseModel):
     @field_validator("license", mode="before")
     @classmethod
     def preserve_legacy_license(cls, value: Any) -> Any:
+        """Load older corpora without treating "open access" as a license."""
         if isinstance(value, str):
             return LicenseInfo(raw_string=value)
         return value
@@ -433,6 +726,37 @@ class Article(BaseModel):
         """Identifiant court reproductible pour experiments.md."""
         base = self.source.acl_id or self.source.arxiv_id or str(self.id)
         return hashlib.md5(base.encode()).hexdigest()[:8]
+
+    @model_validator(mode="after")
+    def provenance_roles_match_selected_source(self) -> Article:
+        """Keep location roles linked to the ArticleSource summary fields."""
+        role_locations: dict[ProvenanceRole, list[ProvenanceLocation]] = {
+            role: [
+                location
+                for record in self.provenance
+                for location in record.locations
+                if role in location.roles
+            ]
+            for role in ProvenanceRole
+        }
+        for role, locations in role_locations.items():
+            if len(locations) > 1:
+                raise ValueError(
+                    f"only one provenance location may have the {role.value} role"
+                )
+
+        for location in role_locations[ProvenanceRole.CITATION_SOURCE]:
+            if location.landing_page_url != self.source.url:
+                raise ValueError("citation-source role must match ArticleSource.url")
+        for location in role_locations[ProvenanceRole.PDF_SOURCE]:
+            if location.pdf_url != self.source.pdf_url:
+                raise ValueError("pdf-source role must match ArticleSource.pdf_url")
+        for location in role_locations[ProvenanceRole.LICENSE_EVIDENCE]:
+            if location.license != self.source.license:
+                raise ValueError(
+                    "license-evidence role must match ArticleSource.license"
+                )
+        return self
 
 
 class Section(BaseModel):
@@ -514,6 +838,9 @@ class Claim(BaseModel):
     text: str
     # Texte source verbatim (pour NLI et audit d'hallucination)
     verbatim: str
+    # Offsets dans Chunk.text (optionnels pour lire les anciennes données).
+    char_start: int | None = Field(None, ge=0)
+    char_end: int | None = Field(None, ge=0)
 
     claim_type: ClaimType
     hedging_level: HedgingLevel
@@ -531,6 +858,14 @@ class Claim(BaseModel):
 
     # Scores de confiance pour l'ablation
     extraction_confidence: float | None = Field(None, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_source_offsets(self) -> Claim:
+        if (self.char_start is None) != (self.char_end is None):
+            raise ValueError("char_start et char_end doivent être renseignés ensemble")
+        if self.char_start is not None and self.char_end <= self.char_start:
+            raise ValueError("char_end doit être supérieur à char_start")
+        return self
 
     # Embedding exclu de la sérialisation (FAISS)
     embedding: list[float] | None = Field(None, exclude=True)
@@ -672,6 +1007,20 @@ class ComparativeTable(BaseModel):
     llm_model: str
 
 
+class ClaimEvidence(BaseModel):
+    """Exact source passage linked to one generated sentence."""
+
+    claim_id: UUID
+    article_id: UUID
+    chunk_id: UUID
+    article_title: str
+    source_url: str | None = None
+    passage: str
+    # Offsets in the parsed section; older chunks may not carry reliable offsets.
+    section_char_start: int | None = Field(None, ge=0)
+    section_char_end: int | None = Field(None, ge=0)
+
+
 class VerifiedSentence(BaseModel):
     """
     Phrase du SoTA généré avec ses références vérifiées phrase par phrase.
@@ -687,6 +1036,7 @@ class VerifiedSentence(BaseModel):
     verification_statuses: list[VerificationStatus]  # 1 statut par citation
     supporting_claim_ids: list[UUID]                 # claims qui soutiennent la phrase
     nli_score: float | None = Field(None, ge=0.0, le=1.0)  # entailment NLI
+    evidence: list[ClaimEvidence] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def lengths_match(self) -> VerifiedSentence:
@@ -740,6 +1090,7 @@ class ReviewDraft(BaseModel):
     @computed_field
     @property
     def overall_hallucination_rate(self) -> float:
+        """Legacy rate for stored HALLUCINATED labels; new runs avoid this status."""
         all_statuses = [
             s
             for sent in self.sentences
@@ -764,6 +1115,126 @@ class ReviewDraft(BaseModel):
         return sum(
             1 for s in all_statuses if s == VerificationStatus.VERIFIED
         ) / len(all_statuses)
+
+    # ── RD-01: honest, per-state verification accounting ───────────────────
+    # overall_hallucination_rate / overall_support_rate use the *total* citation
+    # denominator and only count HALLUCINATED / VERIFIED. They therefore cannot
+    # distinguish "checked and clean" from "never checked". These fields expose
+    # every state separately and make the evaluation denominator explicit so the
+    # API and UI stay consistent (Section 6.5).
+
+    def _status_list(self) -> list[VerificationStatus]:
+        return [s for sent in self.sentences for s in sent.verification_statuses]
+
+    @computed_field
+    @property
+    def n_citations(self) -> int:
+        return len(self._status_list())
+
+    @computed_field
+    @property
+    def n_verified(self) -> int:
+        return sum(1 for s in self._status_list() if s == VerificationStatus.VERIFIED)
+
+    @computed_field
+    @property
+    def n_unsupported(self) -> int:
+        return sum(
+            1 for s in self._status_list()
+            if s == VerificationStatus.EXISTS_NO_SUPPORT
+        )
+
+    @computed_field
+    @property
+    def n_contradicted(self) -> int:
+        return sum(
+            1 for s in self._status_list() if s == VerificationStatus.CONTRADICTED
+        )
+
+    @computed_field
+    @property
+    def n_hallucinated(self) -> int:
+        return sum(
+            1 for s in self._status_list()
+            if s == VerificationStatus.HALLUCINATED
+        )
+
+    @computed_field
+    @property
+    def n_unverifiable(self) -> int:
+        return sum(
+            1 for s in self._status_list()
+            if s == VerificationStatus.UNVERIFIABLE
+        )
+
+    @computed_field
+    @property
+    def n_reference_unresolved(self) -> int:
+        """Citations whose referenced article is absent from the corpus.
+
+        New runs use REFERENCE_UNRESOLVED: absence from this corpus does not prove
+        that the cited work is invented. Legacy HALLUCINATED labels are not
+        reinterpreted because older releases used that value for mixed outcomes.
+        """
+        return sum(
+            1 for s in self._status_list()
+            if s == VerificationStatus.REFERENCE_UNRESOLVED
+        )
+
+    @computed_field
+    @property
+    def n_nli_verdicts(self) -> int:
+        """Citations that reached the NLI entailment stage and got a verdict
+        (supported, contradicted, or no-support). Excludes unevaluated citations and unresolved
+        references, which never run the model."""
+        return self.n_verified + self.n_unsupported + self.n_contradicted
+
+    @computed_field
+    @property
+    def nli_coverage(self) -> float:
+        """Fraction of citations that received an NLI verdict."""
+        return self.n_nli_verdicts / self.n_citations if self.n_citations else 0.0
+
+    @computed_field
+    @property
+    def nli_support_rate(self) -> float:
+        """NLI-supported citations / citations with an NLI verdict."""
+        return self.n_verified / self.n_nli_verdicts if self.n_nli_verdicts else 0.0
+
+    @computed_field
+    @property
+    def n_sentences_without_citations(self) -> int:
+        """Uncited framing sentences, excluded from citation-level statistics."""
+        return sum(1 for sent in self.sentences if not sent.citations)
+
+    @computed_field
+    @property
+    def n_evaluated(self) -> int:
+        """Citations that received a verification determination by *any*
+        mechanism: an NLI verdict, an explicitly unresolved reference, or a
+        legacy HALLUCINATED label. Legacy labels have mixed historical semantics.
+
+        RD-01b: the previous docstring called this 'checked by NLI', which was
+        inaccurate — HALLUCINATED arises from corpus membership, not the model.
+        """
+        return self.n_nli_verdicts + self.n_reference_unresolved + self.n_hallucinated
+
+    @computed_field
+    @property
+    def verification_coverage(self) -> float:
+        """Determinations made / total citations (either mechanism).
+        0.0 when the verification stage resolved nothing."""
+        n = self.n_citations
+        return (self.n_evaluated / n) if n else 0.0
+
+    @computed_field
+    @property
+    def evaluated_support_rate(self) -> float:
+        """supported / evaluated — support rate over citations actually checked.
+        The denominator is n_evaluated, NOT n_citations; the UI must present the
+        two denominators separately (RD-01a)."""
+        n = self.n_evaluated
+        return (self.n_verified / n) if n else 0.0
 
 
 class BibTeXEntry(BaseModel):
@@ -839,6 +1310,13 @@ class SeedResult(BaseModel):
     value: float
 
 
+class EvaluationObservation(BaseModel):
+    """Metric for a fixed example/query, distinct from a model random seed."""
+    sample_id: str
+    metric_name: str
+    value: float
+
+
 class ComponentMetrics(BaseModel):
     """
     Métriques pour un composant avec exactement 3 graines.
@@ -859,27 +1337,39 @@ class ComponentMetrics(BaseModel):
     """
     component_name: str
     metric_name: str
-    seeds: list[SeedResult]
+    seeds: list[SeedResult] = Field(default_factory=list)
+    observations: list[EvaluationObservation] = Field(default_factory=list)
 
-    @field_validator("seeds")
-    @classmethod
-    def exactly_three_seeds(cls, v: list[SeedResult]) -> list[SeedResult]:
-        """§ 2.3.3 : exactement 3 graines, pas plus, pas moins."""
-        if len(v) != 3:
+    @model_validator(mode="after")
+    def validate_samples(self) -> ComponentMetrics:
+        """Keep random seeds separate from arbitrary fixed evaluation cases."""
+        if self.seeds and self.observations:
+            raise ValueError("Provide seeds or observations, not both.")
+        if self.seeds and len(self.seeds) != 3:
             raise ValueError(
-                f"§ 2.3.3 exige exactement 3 graines — {len(v)} fournies."
+                f"§ 2.3.3 exige exactement 3 graines — {len(self.seeds)} fournies."
             )
-        return v
+        if not self.seeds and not self.observations:
+            raise ValueError("At least one seed or evaluation observation is required.")
+        sample_ids = [item.sample_id for item in self.observations]
+        if len(sample_ids) != len(set(sample_ids)):
+            raise ValueError("Evaluation observation sample_id values must be unique.")
+        return self
+
+    def _values(self) -> list[float]:
+        samples = self.seeds or self.observations
+        return [sample.value for sample in samples]
 
     @computed_field
     @property
     def mean(self) -> float:
-        return statistics.mean(r.value for r in self.seeds)
+        return statistics.mean(self._values())
 
     @computed_field
     @property
     def std(self) -> float:
-        return statistics.stdev(r.value for r in self.seeds)
+        values = self._values()
+        return statistics.stdev(values) if len(values) > 1 else 0.0
 
     def summary(self) -> str:
         return f"{self.component_name} | {self.metric_name}: {self.mean:.3f} ± {self.std:.3f}"
@@ -947,9 +1437,8 @@ class HallucinationAuditEntry(BaseModel):
 class HallucinationAudit(BaseModel):
     """
     Rapport d'audit complet pour un ReviewDraft.
-    invented_rate = taux HALLUCINATED / total.
-    support_rate  = taux VERIFIED / total.
-    Ces deux valeurs apparaissent dans les tableaux du rapport final.
+    Automatic NLI does not determine whether a citation was invented. The
+    invented_rate therefore includes human-adjudicated entries only.
     """
     review_id: UUID
     entries: list[HallucinationAuditEntry]
@@ -958,26 +1447,35 @@ class HallucinationAudit(BaseModel):
     @computed_field
     @property
     def invented_rate(self) -> float:
-        if not self.entries:
+        human_entries = [entry for entry in self.entries if entry.auditor != "auto_nli"]
+        if not human_entries:
             return 0.0
         return sum(
-            1 for e in self.entries if e.status == VerificationStatus.HALLUCINATED
-        ) / len(self.entries)
+            1 for e in human_entries if e.status == VerificationStatus.HALLUCINATED
+        ) / len(human_entries)
 
     @computed_field
     @property
     def support_rate(self) -> float:
-        if not self.entries:
+        nli_entries = [
+            entry for entry in self.entries
+            if entry.status in {
+                VerificationStatus.VERIFIED,
+                VerificationStatus.EXISTS_NO_SUPPORT,
+                VerificationStatus.CONTRADICTED,
+            }
+        ]
+        if not nli_entries:
             return 0.0
         return sum(
-            1 for e in self.entries if e.status == VerificationStatus.VERIFIED
-        ) / len(self.entries)
+            1 for e in nli_entries if e.status == VerificationStatus.VERIFIED
+        ) / len(nli_entries)
 
     def summary(self) -> str:
         return (
             f"Audit review {self.review_id} | "
-            f"inventé: {self.invented_rate:.1%} | "
-            f"soutenu: {self.support_rate:.1%} | "
+            f"inventé confirmé humainement: {self.invented_rate:.1%} | "
+            f"NLI indique un soutien: {self.support_rate:.1%} | "
             f"n={len(self.entries)}"
         )
 

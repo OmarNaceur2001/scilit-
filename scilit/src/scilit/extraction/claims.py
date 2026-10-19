@@ -56,6 +56,47 @@ BATCH_SIZE   = 64    # chunks par batch pour nlp.pipe()
 
 log = logging.getLogger(__name__)
 
+
+_INCOMPLETE_TRAILING_WORDS = {
+    "a", "an", "and", "as", "at", "because", "by", "for", "from", "in",
+    "into", "of", "on", "or", "that", "the", "to", "using", "with", "which",
+}
+
+
+def _claim_span(chunk: Chunk, sent) -> tuple[str, int, int] | None:
+    """Return an exact, complete sentence span inside its source chunk.
+
+    spaCy can expose the final fragment of a chunk as a sentence even when the
+    chunker cut through the source sentence. Such fragments must not be repaired
+    by adding punctuation during generation.
+    """
+    raw = sent.text
+    left_trim = len(raw) - len(raw.lstrip())
+    text = raw.strip()
+    char_start = sent.start_char + left_trim
+    char_end = char_start + len(text)
+    if len(text) < 20 or len(text) > 600 or len(text.split()) < 5:
+        return None
+    if chunk.text[char_start:char_end] != text:
+        return None
+
+    if sent.start_char == 0 and chunk.char_start > 0:
+        # An overlapping chunk can begin in the middle of a source sentence.
+        # Its previous chunk also contains the overlap and owns this claim.
+        return None
+
+    # A lower-case chunk opening is often the tail of a sentence from the
+    # preceding overlapping chunk. Keep complete source sentences only.
+    if text[:1].islower():
+        return None
+    core = text.rstrip("\"'”’)]}» ")
+    if not core or core.endswith(("...", "…")) or core[-1] not in ".!?":
+        return None
+    last_word = re.findall(r"[\w'-]+", core[:-1].rstrip())
+    if not last_word or last_word[-1].lower() in _INCOMPLETE_TRAILING_WORDS:
+        return None
+    return text, char_start, char_end
+
 # =============================================================================
 # LEXIQUES
 # =============================================================================
@@ -354,11 +395,12 @@ def extract_claims_from_chunk(chunk: Chunk, nlp) -> list[Claim]:
     doc = nlp(chunk.text)
 
     for sent in doc.sents:
-        text = sent.text.strip()
+        span = _claim_span(chunk, sent)
+        if span is None:
+            continue
+        text, char_start, char_end = span
 
         # Filtres basiques
-        if len(text) < 20 or len(text) > 600:
-            continue
         tokens = [t for t in sent if not t.is_punct and not t.is_space]
         if len(tokens) < 5:
             continue
@@ -378,8 +420,6 @@ def extract_claims_from_chunk(chunk: Chunk, nlp) -> list[Claim]:
         model_name              = _extract_model(text)
 
         # Offset dans le chunk
-        char_start = sent.start_char
-
         claims.append(Claim(
             id=uuid5(chunk.id, f"claim:{char_start}"),
             article_id=chunk.article_id,
@@ -387,6 +427,8 @@ def extract_claims_from_chunk(chunk: Chunk, nlp) -> list[Claim]:
             section_type=chunk.section_type,
             text=text,
             verbatim=text,
+            char_start=char_start,
+            char_end=char_end,
             claim_type=claim_type,
             hedging_level=hedging,
             subject=subject[:200] if subject else None,
@@ -469,9 +511,10 @@ def _extract_claims_from_doc(chunk: Chunk, doc) -> list[Claim]:
     claims: list[Claim] = []
 
     for sent in doc.sents:
-        text = sent.text.strip()
-        if len(text) < 20 or len(text) > 600:
+        span = _claim_span(chunk, sent)
+        if span is None:
             continue
+        text, char_start, char_end = span
         tokens = [t for t in sent if not t.is_punct and not t.is_space]
         if len(tokens) < 5:
             continue
@@ -482,8 +525,6 @@ def _extract_claims_from_doc(chunk: Chunk, doc) -> list[Claim]:
         metric_name, metric_val = _extract_metric(text)
         dataset_name = _extract_dataset(text)
         model_name   = _extract_model(text)
-        char_start = sent.start_char
-
         claims.append(Claim(
             id=uuid5(chunk.id, f"claim:{char_start}"),
             article_id=chunk.article_id,
@@ -491,6 +532,8 @@ def _extract_claims_from_doc(chunk: Chunk, doc) -> list[Claim]:
             section_type=chunk.section_type,
             text=text,
             verbatim=text,
+            char_start=char_start,
+            char_end=char_end,
             claim_type=claim_type,
             hedging_level=hedging,
             subject=subject[:200] if subject else None,
