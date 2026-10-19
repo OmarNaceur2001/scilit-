@@ -34,6 +34,7 @@ import statistics
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from pydantic import (
@@ -67,6 +68,113 @@ class Venue(str, Enum):
     ICML = "icml"
     ARXIV = "arxiv"
     OTHER = "other"
+
+
+class LicenseId(str, Enum):
+    CC_BY_4 = "CC-BY-4.0"
+    CC_BY_3 = "CC-BY-3.0"
+    CC_BY_NC_4 = "CC-BY-NC-4.0"
+    CC_BY_NC_3 = "CC-BY-NC-3.0"
+    CC_BY_SA_4 = "CC-BY-SA-4.0"
+    CC_BY_SA_3 = "CC-BY-SA-3.0"
+    CC_BY_ND_4 = "CC-BY-ND-4.0"
+    CC_BY_ND_3 = "CC-BY-ND-3.0"
+    CC_BY_NC_SA_4 = "CC-BY-NC-SA-4.0"
+    CC_BY_NC_SA_3 = "CC-BY-NC-SA-3.0"
+    CC_BY_NC_ND_4 = "CC-BY-NC-ND-4.0"
+    CC_BY_NC_ND_3 = "CC-BY-NC-ND-3.0"
+    CC0 = "CC0-1.0"
+    APACHE_2 = "Apache-2.0"
+    MIT = "MIT"
+
+
+class LicenseFamily(str, Enum):
+    CC_BY = "cc-by"
+    CC_BY_NC = "cc-by-nc"
+    CC_BY_SA = "cc-by-sa"
+    CC_BY_ND = "cc-by-nd"
+    CC_BY_NC_SA = "cc-by-nc-sa"
+    CC_BY_NC_ND = "cc-by-nc-nd"
+    CC0 = "cc0"
+    PUBLIC_DOMAIN = "public-domain"
+    APACHE_2 = "apache-2.0"
+    MIT = "mit"
+    ALL_RIGHTS_RESERVED = "all-rights-reserved"
+    RESTRICTED = "restricted"
+    UNKNOWN = "unknown"
+
+
+class LicenseEvidence(str, Enum):
+    OPENALEX = "openalex"
+    ACL_POLICY = "acl_policy"
+    UNKNOWN = "unknown"
+
+
+class ProvenanceProvider(str, Enum):
+    OPENALEX = "openalex"
+
+
+class ProvenanceRole(str, Enum):
+    CITATION_SOURCE = "citation_source"
+    PDF_SOURCE = "pdf_source"
+    LICENSE_EVIDENCE = "license_evidence"
+
+
+LICENSE_ID_FAMILY: dict[LicenseId, LicenseFamily] = {
+    LicenseId.CC_BY_4: LicenseFamily.CC_BY,
+    LicenseId.CC_BY_3: LicenseFamily.CC_BY,
+    LicenseId.CC_BY_NC_4: LicenseFamily.CC_BY_NC,
+    LicenseId.CC_BY_NC_3: LicenseFamily.CC_BY_NC,
+    LicenseId.CC_BY_SA_4: LicenseFamily.CC_BY_SA,
+    LicenseId.CC_BY_SA_3: LicenseFamily.CC_BY_SA,
+    LicenseId.CC_BY_ND_4: LicenseFamily.CC_BY_ND,
+    LicenseId.CC_BY_ND_3: LicenseFamily.CC_BY_ND,
+    LicenseId.CC_BY_NC_SA_4: LicenseFamily.CC_BY_NC_SA,
+    LicenseId.CC_BY_NC_SA_3: LicenseFamily.CC_BY_NC_SA,
+    LicenseId.CC_BY_NC_ND_4: LicenseFamily.CC_BY_NC_ND,
+    LicenseId.CC_BY_NC_ND_3: LicenseFamily.CC_BY_NC_ND,
+    LicenseId.CC0: LicenseFamily.CC0,
+    LicenseId.APACHE_2: LicenseFamily.APACHE_2,
+    LicenseId.MIT: LicenseFamily.MIT,
+}
+
+OPENALEX_LICENSE_IDENTIFIERS: dict[str, tuple[LicenseFamily, LicenseId | None]] = {
+    "cc-by": (LicenseFamily.CC_BY, None),
+    "cc-by-4.0": (LicenseFamily.CC_BY, LicenseId.CC_BY_4),
+    "cc-by-3.0": (LicenseFamily.CC_BY, LicenseId.CC_BY_3),
+    "cc-by-nc": (LicenseFamily.CC_BY_NC, None),
+    "cc-by-nc-4.0": (LicenseFamily.CC_BY_NC, LicenseId.CC_BY_NC_4),
+    "cc-by-nc-3.0": (LicenseFamily.CC_BY_NC, LicenseId.CC_BY_NC_3),
+    "cc-by-sa": (LicenseFamily.CC_BY_SA, None),
+    "cc-by-sa-4.0": (LicenseFamily.CC_BY_SA, LicenseId.CC_BY_SA_4),
+    "cc-by-sa-3.0": (LicenseFamily.CC_BY_SA, LicenseId.CC_BY_SA_3),
+    "cc-by-nd": (LicenseFamily.CC_BY_ND, None),
+    "cc-by-nd-4.0": (LicenseFamily.CC_BY_ND, LicenseId.CC_BY_ND_4),
+    "cc-by-nd-3.0": (LicenseFamily.CC_BY_ND, LicenseId.CC_BY_ND_3),
+    "cc-by-nc-sa": (LicenseFamily.CC_BY_NC_SA, None),
+    "cc-by-nc-sa-4.0": (LicenseFamily.CC_BY_NC_SA, LicenseId.CC_BY_NC_SA_4),
+    "cc-by-nc-sa-3.0": (LicenseFamily.CC_BY_NC_SA, LicenseId.CC_BY_NC_SA_3),
+    "cc-by-nc-nd": (LicenseFamily.CC_BY_NC_ND, None),
+    "cc-by-nc-nd-4.0": (LicenseFamily.CC_BY_NC_ND, LicenseId.CC_BY_NC_ND_4),
+    "cc-by-nc-nd-3.0": (LicenseFamily.CC_BY_NC_ND, LicenseId.CC_BY_NC_ND_3),
+    "cc0": (LicenseFamily.CC0, None),
+    "cc0-1.0": (LicenseFamily.CC0, LicenseId.CC0),
+    "public-domain": (LicenseFamily.PUBLIC_DOMAIN, None),
+    "apache-2.0": (LicenseFamily.APACHE_2, LicenseId.APACHE_2),
+    "mit": (LicenseFamily.MIT, LicenseId.MIT),
+    "all-rights-reserved": (LicenseFamily.ALL_RIGHTS_RESERVED, None),
+    "restricted": (LicenseFamily.RESTRICTED, None),
+}
+
+
+def normalize_license_identifier(
+    raw: str | None,
+) -> tuple[LicenseFamily, LicenseId | None]:
+    if not isinstance(raw, str):
+        return LicenseFamily.UNKNOWN, None
+    return OPENALEX_LICENSE_IDENTIFIERS.get(
+        raw.strip().lower(), (LicenseFamily.UNKNOWN, None)
+    )
 
 
 class SectionType(str, Enum):
@@ -148,6 +256,106 @@ class SplitType(str, Enum):
     TEST = "test"   # ← gelé, lecture seule après la première exécution
 
 
+class LicenseInfo(BaseModel):
+    spdx_id: LicenseId | None = None
+    family: LicenseFamily = LicenseFamily.UNKNOWN
+    raw_string: str | None = None
+    source_url: str | None = None
+    evidence: LicenseEvidence = LicenseEvidence.UNKNOWN
+    inference_source: str | None = None
+    policy_conflict: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_license_record(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            value = {"raw_string": value}
+        if not isinstance(value, dict):
+            return value
+
+        data = dict(value)
+        raw = data.get("raw_string")
+        if isinstance(raw, str):
+            family, spdx_id = normalize_license_identifier(raw)
+            data["family"] = family
+            data["spdx_id"] = spdx_id
+            data["evidence"] = (
+                LicenseEvidence.OPENALEX
+                if family != LicenseFamily.UNKNOWN
+                else LicenseEvidence.UNKNOWN
+            )
+            return data
+
+        raw_spdx = data.get("spdx_id")
+        try:
+            spdx_id = LicenseId(raw_spdx) if raw_spdx is not None else None
+        except ValueError:
+            spdx_id = None
+        if spdx_id is not None:
+            data["spdx_id"] = spdx_id
+            data.setdefault("family", LICENSE_ID_FAMILY[spdx_id])
+        elif raw_spdx is not None:
+            data["spdx_id"] = None
+        if data.get("inference_source"):
+            data.setdefault("evidence", LicenseEvidence.ACL_POLICY)
+        else:
+            data.setdefault("evidence", LicenseEvidence.UNKNOWN)
+        return data
+
+    @computed_field
+    @property
+    def is_verified(self) -> bool:
+        return (
+            self.family != LicenseFamily.UNKNOWN
+            and self.evidence in {LicenseEvidence.OPENALEX, LicenseEvidence.ACL_POLICY}
+            and self.policy_conflict is None
+        )
+
+
+def normalize_doi_identifier(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    doi = value.strip()
+    if not doi:
+        return None
+    if doi.lower().startswith("doi:"):
+        doi = doi[4:].strip()
+    try:
+        parsed = urlsplit(doi)
+    except ValueError:
+        parsed = None
+    if parsed and parsed.scheme.lower() in {"http", "https"} and (
+        parsed.hostname or ""
+    ).lower() in {"doi.org", "dx.doi.org"}:
+        doi = parsed.path.lstrip("/")
+    return doi.lower() or None
+
+
+class ProvenanceLocation(BaseModel):
+    location_id: str | None = None
+    landing_page_url: HttpUrl | None = None
+    pdf_url: HttpUrl | None = None
+    version: str | None = None
+    license: LicenseInfo | None = None
+    roles: list[ProvenanceRole] = Field(default_factory=list)
+
+
+class ProvenanceRecord(BaseModel):
+    provider: ProvenanceProvider
+    provider_record_id: str | None = None
+    canonical_record_url: HttpUrl | None = None
+    doi: str | None = None
+    retrieved_at: datetime
+    locations: list[ProvenanceLocation] = Field(default_factory=list)
+
+    @field_validator("retrieved_at")
+    @classmethod
+    def require_aware_utc_timestamp(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("retrieved_at must be timezone-aware")
+        return value.astimezone(timezone.utc)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 2. CORPUS
 # ═══════════════════════════════════════════════════════════════════════════
@@ -165,8 +373,15 @@ class ArticleSource(BaseModel):
     doi: str | None = None
     url: HttpUrl
     pdf_url: HttpUrl | None = None
-    license: str                    # "CC BY 4.0", "ACL anthology open", etc.
+    license: LicenseInfo
     retrieved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @field_validator("license", mode="before")
+    @classmethod
+    def preserve_legacy_license(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return LicenseInfo(raw_string=value)
+        return value
 
     @model_validator(mode="after")
     def at_least_one_id(self) -> ArticleSource:
@@ -202,6 +417,7 @@ class Article(BaseModel):
     abstract: str
     language: Language = Language.EN
     source: ArticleSource
+    provenance: list[ProvenanceRecord] = Field(default_factory=list)
     openalex_id: str | None = None
     doi: str | None = None
     cited_by_count: int = 0
