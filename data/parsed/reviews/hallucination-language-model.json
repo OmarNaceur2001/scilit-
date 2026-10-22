@@ -1,6 +1,6 @@
 {
-  "id": "a7397143-1431-4166-9d0f-bb562821844c",
-  "query_id": "0864cd47-ab01-42c3-bfa2-9e6a1d65c5f7",
+  "id": "aa6b912b-1d09-4249-8f99-59d4ec15efa4",
+  "query_id": "4917fbd7-f33c-4c90-bee1-00c202477701",
   "title": "Literature Review: Hallucination Language Model",
   "sentences": [
     {
@@ -214,7 +214,7 @@
     }
   ],
   "language": "en",
-  "generated_at": "2026-10-22T15:05:53.254454Z",
+  "generated_at": "2026-10-22T18:39:18.914807Z",
   "llm_model": "template-bronze-v1",
   "prompt_version": "v1.0-bronze",
   "overall_hallucination_rate": 0.0,
