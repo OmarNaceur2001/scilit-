@@ -71,7 +71,7 @@ def apply_arxiv(papers: list[dict], truth: dict[str, dict]) -> list[dict]:
 # --------------------------------------------------------------------------
 
 def first_author_key(p: dict) -> str:
-    return norm_title(p["authors"][0]).split()[-1] if p.get("authors") else ""
+    return arxiv_meta.surname(p["authors"][0]) if p.get("authors") else ""
 
 
 def keys(p: dict) -> list[str]:

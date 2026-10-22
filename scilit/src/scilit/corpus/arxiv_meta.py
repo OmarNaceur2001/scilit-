@@ -73,16 +73,18 @@ def fetch(arxiv_ids: list[str], session: requests.Session | None = None) -> dict
     return result
 
 
+def surname(name: str) -> str:
+    """Surname in ASCII lower case, whatever the format: "Nikhil Ghosh" or "Ghosh, Nikhil".
+    Empty string when the name has no Latin letters (e.g. written only in Chinese characters)."""
+    name = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode()  # Müller -> Muller
+    if "," in name:
+        name = name.split(",")[0]
+    parts = re.sub(r"[^a-z\s-]", " ", name.lower()).split()
+    return parts[-1] if parts else ""
+
+
 def _last_names(authors: list[str]) -> set[str]:
-    out = set()
-    for a in authors:
-        a = unicodedata.normalize("NFKD", a).encode("ascii", "ignore").decode()   # Müller -> Muller
-        # "Ghosh, Nikhil" (surname first) vs "Nikhil Ghosh" (surname last): both formats occur
-        surname = a.split(",")[0] if "," in a else a
-        parts = re.sub(r"[^a-z\s-]", " ", surname.lower()).split()
-        if parts:
-            out.add(parts[-1])
-    return out
+    return {s for s in (surname(a) for a in authors) if s}
 
 
 def same_paper(oa_authors: list[str], oa_year: int | None, ax: dict) -> bool:

@@ -62,6 +62,8 @@ class OpenAlexClient:
         params = dict(params)
         if self.email:
             params["mailto"] = self.email          # OpenAlex "polite pool": faster, more reliable
+        if os.environ.get("OPENALEX_API_KEY"):     # free personal key: own daily budget
+            params["api_key"] = os.environ["OPENALEX_API_KEY"]
         for attempt in range(5):
             try:
                 r = self.session.get(f"{OPENALEX}{path}", params=params, timeout=30)
@@ -88,7 +90,7 @@ class OpenAlexClient:
             "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "purpose": purpose,
             "path": path,
-            "params": {k: v for k, v in params.items() if k not in ("mailto", "select")},
+            "params": {k: v for k, v in params.items() if k not in ("mailto", "select", "api_key")},
             "count": (data.get("meta") or {}).get("count"),
             "returned": len(data.get("results", [])) if "results" in data else 1,
         }
@@ -256,10 +258,16 @@ def find_seeds(client: OpenAlexClient, theme: dict, cfg: dict) -> tuple[list[dic
             continue
         rec = to_record(work)
         reason = filter_reason(rec, cfg)
-        report.append({"title": seed["title"], "status": "found" if reason is None else "filtered_out",
-                       "reason": reason, "openalex_id": rec["openalex_id"], "score": score,
+        # Seeds are verified by hand (ID + arXiv). OpenAlex's labels (field, language, open-access
+        # flag) are wrong for some of them (RoBERTa labelled "Arts and Humanities"), so for seeds
+        # only the year rule applies; the label they were kept despite is reported.
+        kept_despite = reason if reason and not reason.startswith("year") else None
+        ok = reason is None or kept_despite is not None
+        report.append({"title": seed["title"], "status": "found" if ok else "filtered_out",
+                       "reason": reason, "kept_despite": kept_despite,
+                       "openalex_id": rec["openalex_id"], "score": score,
                        "title_mismatch": score < SEED_MATCH_MIN})
-        if reason is None:
+        if ok:
             found.append(rec)
     verify_against_arxiv(found, report)
     return found, report
@@ -393,6 +401,9 @@ def write_report(path: Path, cfg: dict, corpus: dict, stats: dict, seed_reports:
               + (" · **record belongs to another paper: not snowballed**" if r.get("conflated") else
                  " · authors and year match arXiv: only the title is wrong")
               for tid, r in flagged] or ["None."]
+    despite = [(tid, r) for tid, rs in seed_reports.items() for r in rs if r.get("kept_despite")]
+    lines += ["", "## Seeds kept despite a wrong OpenAlex label", ""]
+    lines += [f"- **{tid}** · OpenAlex says {r['kept_despite']}: {r['title']}" for tid, r in despite] or ["None."]
     multi = sum(1 for p in corpus.values() if len(p["themes"]) > 1)
     lines += ["", f"Papers in more than one theme: {multi}."]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
