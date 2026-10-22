@@ -6,7 +6,10 @@ SciLit is a Python research-literature pipeline for collecting papers, indexing 
 
 Python 3.10 or newer is required.
 
-1. Create and activate a virtual environment.
+1. Create and activate a virtual environment:
+   ```bash
+   .venv\Scripts\Activate.ps1
+   ```
 2. Install the package and its dependencies from the repository root:
 
    ```bash

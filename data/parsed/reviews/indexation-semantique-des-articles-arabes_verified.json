@@ -1,0 +1,74 @@
+{
+  "id": "23b0b4ee-8158-4c0f-9cf4-0bf014b3c24c",
+  "query_id": "85d67200-55d7-434a-8291-70eb6a330bac",
+  "title": "Literature Review: Indexation Sémantique Des Articles Arabes",
+  "sentences": [
+    {
+      "text": "This draft includes source claims from 1 papers that passed claim-level relevance checks for: indexation sémantique des articles arabes.",
+      "citations": [],
+      "verification_statuses": [],
+      "supporting_claim_ids": [],
+      "nli_score": null,
+      "evidence": [],
+      "hallucination_rate": 0.0,
+      "support_rate": 0.0
+    },
+    {
+      "text": "In the course of spelling out detailed analyses for the two articles, various more general issues relevant to current semantic theory are addressed, in particular with respect to the analysis of donkey sentences and domain restriction.",
+      "citations": [
+        "e6029155-11ff-5271-b82a-08cf189edb7f"
+      ],
+      "verification_statuses": [
+        "verified"
+      ],
+      "supporting_claim_ids": [
+        "af09f48c-33ba-5236-9f1b-8453bdd5db0a"
+      ],
+      "nli_score": 0.8814,
+      "evidence": [
+        {
+          "claim_id": "af09f48c-33ba-5236-9f1b-8453bdd5db0a",
+          "article_id": "e6029155-11ff-5271-b82a-08cf189edb7f",
+          "chunk_id": "767b3a08-1514-542c-ae42-fd4f03d3b4d7",
+          "article_title": "Two Types of Definites in Natural Language",
+          "source_url": "https://scholarworks.umass.edu/open_access_dissertations/122",
+          "passage": "In the course of spelling out detailed analyses for the two articles, various more general issues relevant to current semantic theory are addressed, in particular with respect to the analysis of donkey sentences and domain restriction.",
+          "section_char_start": 602,
+          "section_char_end": 837
+        }
+      ],
+      "hallucination_rate": 0.0,
+      "support_rate": 1.0
+    },
+    {
+      "text": "The displayed source claims carry SciLit extraction labels: 0 method claims and 1 finding claim across 1 papers. These labels have not been independently validated as methodological contributions or empirical findings.",
+      "citations": [],
+      "verification_statuses": [],
+      "supporting_claim_ids": [],
+      "nli_score": null,
+      "evidence": [],
+      "hallucination_rate": 0.0,
+      "support_rate": 0.0
+    }
+  ],
+  "language": "en",
+  "generated_at": "2026-10-22T20:24:42.402122Z",
+  "llm_model": "template-bronze-v1",
+  "prompt_version": "v1.0-bronze",
+  "overall_hallucination_rate": 0.0,
+  "overall_support_rate": 1.0,
+  "n_citations": 1,
+  "n_verified": 1,
+  "n_unsupported": 0,
+  "n_contradicted": 0,
+  "n_hallucinated": 0,
+  "n_unverifiable": 0,
+  "n_reference_unresolved": 0,
+  "n_nli_verdicts": 1,
+  "nli_coverage": 1.0,
+  "nli_support_rate": 1.0,
+  "n_sentences_without_citations": 2,
+  "n_evaluated": 1,
+  "verification_coverage": 1.0,
+  "evaluated_support_rate": 1.0
+}

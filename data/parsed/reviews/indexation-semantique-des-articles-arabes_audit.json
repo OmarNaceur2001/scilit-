@@ -1,0 +1,16 @@
+{
+  "review_id": "23b0b4ee-8158-4c0f-9cf4-0bf014b3c24c",
+  "entries": [
+    {
+      "review_id": "23b0b4ee-8158-4c0f-9cf4-0bf014b3c24c",
+      "sentence_text": "In the course of spelling out detailed analyses for the two articles, various more general issues relevant to current semantic theory are addressed, in particular with respect to the analysis of donke",
+      "cited_key": "Schwarz2022Two",
+      "status": "verified",
+      "auditor": "auto_nli",
+      "note": "automatic_nli_entailment_indicator | entailment_probability=0.8814"
+    }
+  ],
+  "audited_at": "2026-10-22T20:24:44.620278Z",
+  "invented_rate": 0.0,
+  "support_rate": 1.0
+}

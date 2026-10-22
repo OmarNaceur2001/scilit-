@@ -153,17 +153,42 @@ def _query_language(query: str) -> str:
     return "en"
 
 
+class _MarianSeq2SeqTranslator:
+    """Fallback translator using MarianMTModel when pipeline('translation') is removed in transformers >=5."""
+
+    def __init__(self, model_name: str):
+        from transformers import MarianMTModel, MarianTokenizer
+
+        self.tokenizer = MarianTokenizer.from_pretrained(model_name)
+        self.model = MarianMTModel.from_pretrained(model_name)
+
+    def __call__(self, text: str, max_length: int = 256, truncation: bool = True):
+        inputs = self.tokenizer(
+            text,
+            return_tensors="pt",
+            max_length=max_length,
+            truncation=truncation,
+        )
+        outputs = self.model.generate(**inputs)
+        translated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        return [{"translation_text": translated_text}]
+
+
 @lru_cache(maxsize=4)
 def _load_query_translator(language: str, model_name: str):
-    """Load an open Transformers translation pipeline on first FR/AR query."""
-    from transformers import pipeline
+    """Load an open Transformers translation pipeline or MarianMT model on first FR/AR query."""
+    try:
+        from transformers import pipeline
 
-    return pipeline(
-        "translation",
-        model=model_name,
-        tokenizer=model_name,
-        device=-1,
-    )
+        return pipeline(
+            "translation",
+            model=model_name,
+            tokenizer=model_name,
+            device=-1,
+        )
+    except (KeyError, ValueError):
+        return _MarianSeq2SeqTranslator(model_name)
+
 
 
 def _parallel_english_query(query: str, language: str) -> tuple[str | None, str]:
