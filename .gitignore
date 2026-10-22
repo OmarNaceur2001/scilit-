@@ -26,3 +26,5 @@ data/parsed/*
 models/
 .env
 .vscode/settings.json
+
+data/

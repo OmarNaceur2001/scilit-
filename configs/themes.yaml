@@ -1,0 +1,136 @@
+# SciLit — corpus themes (Part 0 · Corpus scoping)
+# One theme per content chapter of the NLP module (Ch2-Ch11).
+# Each theme drives one OpenAlex keyword search, then a snowball from its seed papers.
+# seeds = papers the corpus MUST contain for this theme.
+#         Identified by arXiv ID or DOI (titles are ambiguous, and OpenAlex titles can be wrong).
+#         The title is for humans; `--check-seeds` prints what each ID resolves to.
+
+year_min: 2013        # word2vec (2013) = start of neural NLP; everything from Ch5 on comes after it
+year_max: 2025        # the subject sets no dates: this range is our choice, one rule for every theme
+papers_per_theme: 110 # keyword-search quota -> about 1,400 papers in total (subject: 500-2,000)
+field: computer_science  # search restricted to OpenAlex's Computer Science field
+                         # (removes power-transformer and LoRa-radio papers)
+
+snowball:                # papers citing, or cited by, the seed papers
+  max_per_theme: 20      # cap so the snowball cannot dominate a theme
+  require_keyword_match: true  # kept only if title or abstract contains a theme keyword
+
+themes:
+  - id: tokenization
+    name: Tokenization and subword models
+    chapters: [Ch2]
+    keywords: ["subword tokenization", "byte pair encoding", "sentencepiece", "tokenizer"]
+    seeds:
+      - {arxiv: "1508.07909", title: "Neural Machine Translation of Rare Words with Subword Units"}
+      - {arxiv: "1808.06226", title: "SentencePiece: A simple and language independent subword tokenizer and detokenizer for Neural Text Processing"}
+      - {arxiv: "1910.13267", title: "BPE-Dropout: Simple and Effective Subword Regularization"}
+      - {arxiv: "2105.13626", title: "ByT5: Towards a Token-Free Future with Pre-trained Byte-to-Byte Models"}
+
+  - id: attention
+    name: Attention and Transformer analysis
+    chapters: [Ch6]
+    keywords: ["self-attention", "transformer language model", "attention heads analysis", "long-range attention"]
+    seeds:
+      - {arxiv: "1706.03762", title: "Attention Is All You Need"}
+      - {arxiv: "1906.04341", title: "What Does BERT Look At? An Analysis of BERT's Attention"}
+      - {arxiv: "1902.10186", title: "Attention is not Explanation"}
+
+  - id: word_embeddings
+    name: Word embeddings and vector representations
+    chapters: [Ch5]
+    keywords: ["word embeddings", "word2vec", "GloVe", "fastText subword embeddings", "distributional semantics"]
+    seeds:
+      - {arxiv: "1301.3781", title: "Efficient Estimation of Word Representations in Vector Space"}
+      - {doi: "10.3115/v1/D14-1162", title: "GloVe: Global Vectors for Word Representation"}
+      - {arxiv: "1607.04606", title: "Enriching Word Vectors with Subword Information"}
+
+  - id: syntax_semantics
+    name: Syntax, parsing and semantics
+    chapters: [Ch3, Ch4]
+    keywords: ["dependency parsing", "part-of-speech tagging", "coreference resolution", "syntactic probing"]
+    seeds:
+      - {arxiv: "1611.01734", title: "Deep Biaffine Attention for Neural Dependency Parsing"}
+      - {arxiv: "1707.07045", title: "End-to-end Neural Coreference Resolution"}
+      - {doi: "10.18653/v1/N19-1419", title: "A Structural Probe for Finding Syntax in Word Representations"}
+
+  - id: embeddings
+    name: Sentence embeddings and semantic search
+    chapters: [Ch5, Ch9]
+    keywords: ["sentence embeddings", "semantic similarity", "dense retrieval", "contrastive learning sentence"]
+    seeds:
+      - {arxiv: "1908.10084", title: "Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks"}
+      - {arxiv: "2104.08821", title: "SimCSE: Simple Contrastive Learning of Sentence Embeddings"}
+      - {arxiv: "2004.04906", title: "Dense Passage Retrieval for Open-Domain Question Answering"}
+
+  - id: pretrained_lm
+    name: Pretrained language models and fine-tuning
+    chapters: [Ch7]
+    keywords: ["pretrained language model", "BERT fine-tuning", "masked language model", "encoder-decoder pretraining"]
+    seeds:
+      - {arxiv: "1810.04805", title: "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding"}
+      - {arxiv: "1907.11692", title: "RoBERTa: A Robustly Optimized BERT Pretraining Approach"}
+      - {arxiv: "1910.10683", title: "Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer"}
+
+  - id: peft
+    name: Parameter-efficient fine-tuning (LoRA, adapters)
+    chapters: [Ch7]
+    keywords: ["parameter-efficient fine-tuning", "low-rank adaptation", "adapter tuning", "prefix tuning"]  # not bare "LoRA": LoRa is also a radio protocol
+    seeds:
+      - {arxiv: "2106.09685", title: "LoRA: Low-Rank Adaptation of Large Language Models"}
+      - {arxiv: "2305.14314", title: "QLoRA: Efficient Finetuning of Quantized LLMs"}
+      - {arxiv: "1902.00751", title: "Parameter-Efficient Transfer Learning for NLP"}
+      - {arxiv: "2101.00190", title: "Prefix-Tuning: Optimizing Continuous Prompts for Generation"}
+
+  - id: prompting
+    name: Instruction tuning and prompting
+    chapters: [Ch8]
+    keywords: ["instruction tuning", "prompting large language models", "chain-of-thought", "in-context learning"]
+    seeds:
+      - {arxiv: "2109.01652", title: "Finetuned Language Models Are Zero-Shot Learners"}
+      - {arxiv: "2203.02155", title: "Training language models to follow instructions with human feedback"}
+      - {arxiv: "2201.11903", title: "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models"}
+
+  - id: rag
+    name: Retrieval-augmented generation
+    chapters: [Ch9]
+    keywords: ["retrieval-augmented generation", "retrieval augmented language model", "open-domain question answering retrieval"]
+    seeds:
+      - {arxiv: "2005.11401", title: "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks"}
+      - {arxiv: "2002.08909", title: "REALM: Retrieval-Augmented Language Model Pre-Training"}
+      - {arxiv: "2307.03172", title: "Lost in the Middle: How Language Models Use Long Contexts"}
+
+  - id: hallucination
+    name: Hallucination and factuality
+    chapters: [Ch11]
+    keywords: ["hallucination language model", "factual consistency", "faithfulness generation", "fact verification"]
+    seeds:
+      - {arxiv: "2202.03629", title: "Survey of Hallucination in Natural Language Generation"}
+      - {arxiv: "2303.08896", title: "SelfCheckGPT: Zero-Resource Black-Box Hallucination Detection for Generative Large Language Models"}
+      - {arxiv: "2109.07958", title: "TruthfulQA: Measuring How Models Mimic Human Falsehoods"}
+
+  - id: multilingual_arabic
+    name: Multilingual, Arabic and low-resource NLP
+    chapters: [Ch10]
+    keywords: ["multilingual language model", "Arabic NLP", "cross-lingual transfer", "low-resource languages", "Arabic dialects"]
+    seeds:
+      - {arxiv: "1911.02116", title: "Unsupervised Cross-lingual Representation Learning at Scale"}
+      - {arxiv: "2003.00104", title: "AraBERT: Transformer-based Model for Arabic Language Understanding"}
+      - {arxiv: "1906.01502", title: "How multilingual is Multilingual BERT?"}
+
+  - id: scientific_nlp
+    name: Scientific documents and citation analysis
+    chapters: [Ch7, Ch9]
+    keywords: ["citation intent classification", "scientific document representation", "scholarly document processing", "citation function"]
+    seeds:
+      - {arxiv: "1903.10676", title: "SciBERT: A Pretrained Language Model for Scientific Text"}
+      - {arxiv: "1904.01608", title: "Structural Scaffolds for Citation Intent Classification in Scientific Publications"}
+      - {arxiv: "2004.07180", title: "SPECTER: Document-level Representation Learning using Citation-informed Transformers"}
+
+  - id: evaluation_robustness
+    name: Evaluation, robustness and bias
+    chapters: [Ch11]
+    keywords: ["NLP model robustness", "behavioral testing NLP", "bias in language models", "text generation evaluation metric"]
+    seeds:
+      - {arxiv: "2005.04118", title: "Beyond Accuracy: Behavioral Testing of NLP Models with CheckList"}
+      - {arxiv: "1904.09675", title: "BERTScore: Evaluating Text Generation with BERT"}
+      - {arxiv: "2009.03300", title: "Measuring Massive Multitask Language Understanding"}
