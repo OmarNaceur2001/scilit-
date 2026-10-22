@@ -210,8 +210,12 @@ def search(req: SearchRequest):
     search_fn = _get_retrieval()
     try:
         ranked = search_fn(req.query, k=req.k, mode=req.mode)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        log.exception("search_unexpected_failure")
+        raise HTTPException(
+            status_code=500,
+            detail="Search failed unexpectedly; consult server logs.",
+        ) from None
 
     results = [
         SearchResult(
@@ -335,8 +339,12 @@ def generate(req: GenerateRequest):
         raise HTTPException(status_code=422, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        log.exception("review_generation_unexpected_failure")
+        raise HTTPException(
+            status_code=500,
+            detail="Review generation failed unexpectedly; consult server logs.",
+        ) from None
 
     slug = _slugify(req.query)
 

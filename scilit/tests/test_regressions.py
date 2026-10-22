@@ -1509,6 +1509,17 @@ def test_summary_counts_zero_when_no_claims_rendered():
     assert counts == {"method": 0, "finding": 0}
 
 
+def test_summary_calls_counts_extractor_labels_not_empirical_results():
+    from scilit.generation.template import _claim_type_label_summary
+
+    summary = _claim_type_label_summary({"method": 1, "finding": 3}, 3)
+
+    assert "1 method claim and 3 finding claims across 3 papers" in summary
+    assert "not been independently validated" in summary
+    assert "methodological contributions or empirical findings" in summary
+    assert "presents 1 methodological contribution" not in summary
+
+
 def test_citation_graph_uses_article_referenced_works():
     source = make_article(20, referenced_works=["W21", "W99"])
     target = make_article(21)
@@ -1670,9 +1681,12 @@ def test_claim_level_relevance_rejects_dense_out_of_topic_candidates():
     assert score > 0
 
 
-def test_generation_quotes_relevant_claims_with_exact_evidence_and_deduplicates(monkeypatch):
+def test_generation_quotes_relevant_claims_with_exact_evidence_and_deduplicates(
+    monkeypatch, caplog
+):
     from scilit.generation import template
 
+    _enable_generation_diagnostics(caplog)
     article = make_article(807, title="LoRA fine-tuning for low-resource NLP")
     article_data = article.model_dump(mode="json")
     chunks = [
@@ -1722,7 +1736,15 @@ def test_generation_quotes_relevant_claims_with_exact_evidence_and_deduplicates(
     monkeypatch.setattr(
         template,
         "_load_chunk_metadata",
-        lambda: {chunk["id"]: {"char_start": 0} for chunk in chunks},
+        lambda: {
+            chunk["id"]: {
+                "article_id": str(article.id),
+                "text": chunk["text"],
+                "char_start": 0,
+                "char_end": len(chunk["text"]),
+            }
+            for chunk in chunks
+        },
     )
     monkeypatch.setattr(template, "retrieve", lambda *args, **kwargs: ranked)
 
@@ -1738,11 +1760,17 @@ def test_generation_quotes_relevant_claims_with_exact_evidence_and_deduplicates(
     assert all(sentence.evidence[0].passage == sentence.text for sentence in cited_sentences)
     assert all(sentence.evidence[0].article_id == article.id for sentence in cited_sentences)
     assert len(bibtex) == 1
+    diagnostics = _last_generation_diagnostics(caplog)
+    assert diagnostics["claims"]["associated_with_retrieved_chunks"] == 4
+    assert diagnostics["claims"]["relevance_pass"] == 3
+    assert diagnostics["claims"]["final_eligible"] == 2
+    assert sum(diagnostics["claims"]["rejections"].values()) + 2 == 4
 
 
-def test_comparison_review_requires_evidence_for_both_named_sides(monkeypatch):
+def test_comparison_review_requires_evidence_for_both_named_sides(monkeypatch, caplog):
     from scilit.generation import template
 
+    _enable_generation_diagnostics(caplog)
     article = make_article(808, title="Full fine-tuning for low-resource NLP")
     article_id = str(article.id)
     chunk_id = uuid5(article.id, "right-side-only")
@@ -1755,7 +1783,16 @@ def test_comparison_review_requires_evidence_for_both_named_sides(monkeypatch):
         "id": str(claim_id), "article_id": article_id, "chunk_id": str(chunk_id),
         "claim_type": "finding", "text": source, "verbatim": source,
     }])
-    monkeypatch.setattr(template, "_load_chunk_metadata", lambda: {str(chunk_id): {"char_start": 0}})
+    monkeypatch.setattr(
+        template,
+        "_load_chunk_metadata",
+        lambda: {str(chunk_id): {
+            "article_id": article_id,
+            "text": source,
+            "char_start": 0,
+            "char_end": len(source),
+        }},
+    )
     monkeypatch.setattr(template, "retrieve", lambda *args, **kwargs: [RankedResult(
         query_id=UUID(int=9801),
         chunk_id=chunk_id,
@@ -1770,6 +1807,643 @@ def test_comparison_review_requires_evidence_for_both_named_sides(monkeypatch):
 
     with pytest.raises(template.InsufficientRelevantEvidence, match="LoRA"):
         template.generate("LoRA vs full fine-tuning in low-resource NLP", k=5)
+    diagnostics = _last_generation_diagnostics(caplog)
+    assert diagnostics["comparison"]["passed"] is False
+    assert diagnostics["comparison"]["missing_sides"] == 1
+    assert diagnostics["comparison"]["side_candidate_counts"] == [0, 1]
+    assert diagnostics["claims"]["rejections"]["comparison_evidence"] == 1
+    assert sum(diagnostics["claims"]["rejections"].values()) + diagnostics["claims"]["final_eligible"] == 1
+
+
+def _last_generation_diagnostics(caplog):
+    import json
+    import logging
+
+    caplog.set_level(logging.INFO, logger="scilit.generation.template")
+
+    entries = [
+        record.getMessage().split("generation_stages ", 1)[1]
+        for record in caplog.records
+        if "generation_stages " in record.getMessage()
+    ]
+    assert entries, "generation_stages diagnostics were not logged"
+    return json.loads(entries[-1])
+
+
+def _enable_generation_diagnostics(caplog):
+    import logging
+
+    caplog.set_level(logging.INFO, logger="scilit.generation.template")
+
+
+def _patch_generation_case(
+    monkeypatch,
+    template,
+    article,
+    source_text,
+    *,
+    claim_text=None,
+    claim_chunk_id=None,
+    claim_article_id=None,
+    metadata_article_id=None,
+    metadata_missing=False,
+    claim_offsets=None,
+    retrieval=True,
+):
+    chunk_id = uuid5(article.id, "query-evidence-fixture")
+    associated_chunk_id = claim_chunk_id or chunk_id
+    claim_source = source_text if claim_text is None else claim_text
+    stored_start, stored_end = claim_offsets or (0, len(claim_source))
+    claim = {
+        "id": str(uuid5(associated_chunk_id, "claim")),
+        "article_id": str(claim_article_id or article.id),
+        "chunk_id": str(associated_chunk_id),
+        "claim_type": "finding",
+        "text": claim_source,
+        "verbatim": claim_source,
+        "char_start": stored_start,
+        "char_end": stored_end,
+    }
+    ranked = RankedResult(
+        query_id=UUID(int=9802),
+        chunk_id=chunk_id,
+        article_id=article.id,
+        section_type=SectionType.ABSTRACT,
+        chunk_text=source_text,
+        bm25_rank=1,
+        dense_rank=1,
+        rrf_score=0.03,
+        final_rank=1,
+    )
+    monkeypatch.setattr(
+        template, "_load_articles", lambda: {
+            str(article.id): article.model_dump(mode="json")
+        }
+    )
+    monkeypatch.setattr(template, "_load_claims", lambda: [claim])
+    monkeypatch.setattr(
+        template,
+        "_load_chunk_metadata",
+        lambda: {} if metadata_missing else {str(chunk_id): {
+            "article_id": str(metadata_article_id or article.id),
+            "text": source_text,
+            "char_start": 0,
+            "char_end": len(source_text),
+        }},
+    )
+    monkeypatch.setattr(
+        template,
+        "retrieve",
+        lambda *args, **kwargs: [ranked] if retrieval else [],
+    )
+    return chunk_id, claim
+
+
+def test_query_terms_support_arabic_french_accents_and_english():
+    from scilit.corpus.index import tokenize
+    from scilit.generation.template import (
+        _comparison_clarification,
+        _comparison_sides,
+        _normalize_query,
+        _query_language,
+        _query_terms,
+    )
+
+    arabic_terms = _query_terms("ما تأثير LoRA على البيانات قليلة الموارد؟")
+    french_terms = _query_terms("Quels résultats pour l’étude des données ?")
+    english_terms = _query_terms("LoRA fine-tuning in low-resource NLP")
+
+    assert "lora" in arabic_terms
+    assert {"تاثير", "البيانات", "قليلة", "الموارد"} <= arabic_terms
+    assert {"resultats", "etude", "donnees"} <= french_terms
+    assert {"lora", "fine", "tuning", "low", "resource", "nlp"} <= english_terms
+    # BM25's current English tokenizer has no Arabic tokens; translation supplies
+    # the parallel English retrieval query for Arabic input.
+    assert tokenize("مقارنة بين LoRA") == ["lora"]
+    assert _query_language("مقارنة بين LoRA و full fine-tuning") == "ar"
+    assert _query_language("Quels résultats pour l’étude ?") == "fr"
+    assert _query_language("How does LoRA affect low-resource NLP?") == "en"
+    assert {"lora", "adaptation"} <= _query_terms("How does LoRA improve adaptation?")
+    assert _normalize_query("  LoRA\t fine\n tuning  ") == "LoRA fine tuning"
+    arabic_sides = _comparison_sides("مُقارنة بين LoRA و full fine-tuning")
+    french_sides = _comparison_sides("Comparaison entre LoRA et full fine-tuning")
+    assert arabic_sides is not None and arabic_sides[0][1] == {"lora"}
+    assert french_sides is not None and french_sides[0][1] == {"lora"}
+    assert _comparison_clarification("RAG مقابل NLP") is not None
+
+
+def test_claim_relevance_rejects_generic_single_word_overlap():
+    from scilit.generation.template import _claim_relevance
+
+    relevant, score = _claim_relevance(
+        "What is the performance?",
+        "The study reports improved performance across several tasks.",
+        "A general benchmark study",
+    )
+    assert relevant is False
+    assert score == 0.0
+
+
+def test_broad_nlp_definition_can_match_short_question():
+    from scilit.generation.template import _claim_relevance
+
+    relevant, score = _claim_relevance(
+        "What is NLP",
+        "Natural language processing (NLP) is the field concerned with processing human language.",
+        "An introduction to language technology",
+    )
+
+    assert relevant is True
+    assert score > 0.0
+
+
+def test_broad_nlp_query_labels_specialized_claim_as_topical_context(monkeypatch):
+    from scilit.generation import template
+
+    article = make_article(
+        818,
+        title="Natural Language Processing for Requirements Engineering",
+    )
+    source = (
+        "In requirements engineering, NLP tools help analysts trace textual requirements."
+    )
+    _patch_generation_case(monkeypatch, template, article, source)
+    monkeypatch.setattr(template, "_load_section_metadata", lambda: {})
+
+    draft, _ = template.generate("What is NLP")
+
+    assert "one meaningful topic term" in draft.sentences[0].text
+    assert "topical matches" in draft.sentences[0].text
+    assert "rather than define the topic generally" in draft.sentences[0].text
+    evidence_sentences = [sentence for sentence in draft.sentences if sentence.evidence]
+    assert [sentence.text for sentence in evidence_sentences] == [source]
+
+
+@pytest.mark.parametrize(
+    ("claim_text", "rejection"),
+    [
+        ("LoRA enables fine-tuning in low-resource NLP", "incomplete"),
+        (
+            "LoRA enables fine-tuning in low-resource NLP tasks.",
+            "not_verbatim_in_source",
+        ),
+    ],
+)
+def test_incomplete_or_altered_claim_is_rejected_with_diagnostic(
+    monkeypatch, caplog, claim_text, rejection
+):
+    from scilit.generation import template
+
+    _enable_generation_diagnostics(caplog)
+    article = make_article(809, title="LoRA fine-tuning for low-resource NLP")
+    source = "LoRA enables fine-tuning in low-resource NLP settings."
+    _patch_generation_case(
+        monkeypatch,
+        template,
+        article,
+        source,
+        claim_text=claim_text,
+    )
+
+    with pytest.raises(template.InsufficientRelevantEvidence) as exc_info:
+        template.generate("LoRA fine-tuning in low-resource NLP")
+
+    diagnostics = _last_generation_diagnostics(caplog)
+    assert diagnostics["claims"]["rejections"][rejection] == 1
+    assert sum(diagnostics["claims"]["rejections"].values()) == 1
+    assert sum(diagnostics["claims"]["rejections"].values()) + diagnostics["claims"]["final_eligible"] == diagnostics["claims"]["associated_with_retrieved_chunks"]
+    assert diagnostics["claims"]["final_eligible"] == 0
+    assert "Source verification remains enabled" in str(exc_info.value)
+
+
+def test_claim_cut_inside_source_token_is_not_source_verified(monkeypatch, caplog):
+    """Synthetic regression for an abstract chunk starting inside NLP4RE."""
+    from scilit.generation import template
+
+    _enable_generation_diagnostics(caplog)
+    article = make_article(
+        819,
+        title="Natural Language Processing for Requirements Engineering",
+    )
+    section_text = "NLP4RE tools support requirements analysis with NLP methods."
+    chunk_start = 3  # Synthetic parser boundary leaves only "4RE tools...".
+    source = section_text[chunk_start:]
+    chunk_id, _ = _patch_generation_case(monkeypatch, template, article, source)
+    section_id = str(uuid5(article.id, "synthetic-source-section"))
+    monkeypatch.setattr(
+        template,
+        "_load_chunk_metadata",
+        lambda: {str(chunk_id): {
+            "article_id": str(article.id),
+            "section_id": section_id,
+            "text": source,
+            "char_start": chunk_start,
+            "char_end": len(section_text),
+        }},
+    )
+    monkeypatch.setattr(
+        template,
+        "_load_section_metadata",
+        lambda: {section_id: {
+            "id": section_id,
+            "article_id": str(article.id),
+            "text": section_text,
+        }},
+    )
+
+    with pytest.raises(template.InsufficientRelevantEvidence):
+        template.generate("What is NLP")
+
+    diagnostics = _last_generation_diagnostics(caplog)
+    assert diagnostics["claims"]["verbatim_in_chunk"] == 1
+    assert diagnostics["claims"]["source_span_valid"] == 0
+    assert diagnostics["claims"]["rejections"]["source_token_boundary"] == 1
+    assert diagnostics["claims"]["relevance_pass"] == 0
+
+
+def test_claim_is_rejected_when_chunk_does_not_match_its_parsed_section(
+    monkeypatch, caplog
+):
+    """Synthetic regression for inconsistent section and chunk provenance."""
+    from scilit.generation import template
+
+    _enable_generation_diagnostics(caplog)
+    article = make_article(820, title="LoRA fine-tuning in low-resource NLP")
+    source = "LoRA adaptation reduces memory use in low-resource NLP tasks."
+    section_text = "A different sentence is stored in the parsed section."
+    chunk_id, _ = _patch_generation_case(monkeypatch, template, article, source)
+    section_id = str(uuid5(article.id, "mismatched-source-section"))
+    monkeypatch.setattr(
+        template,
+        "_load_chunk_metadata",
+        lambda: {str(chunk_id): {
+            "article_id": str(article.id),
+            "section_id": section_id,
+            "text": source,
+            "char_start": 0,
+            "char_end": len(source),
+        }},
+    )
+    monkeypatch.setattr(
+        template,
+        "_load_section_metadata",
+        lambda: {section_id: {
+            "id": section_id,
+            "article_id": str(article.id),
+            "text": section_text,
+        }},
+    )
+
+    with pytest.raises(template.InsufficientRelevantEvidence):
+        template.generate("LoRA adaptation in low-resource NLP")
+
+    diagnostics = _last_generation_diagnostics(caplog)
+    assert diagnostics["claims"]["verbatim_in_chunk"] == 1
+    assert diagnostics["claims"]["source_span_valid"] == 0
+    assert diagnostics["claims"]["rejections"]["source_section_mismatch"] == 1
+    assert diagnostics["claims"]["relevance_pass"] == 0
+
+
+def test_invalid_offsets_fall_back_only_to_an_exact_source_match(
+    monkeypatch, caplog
+):
+    from scilit.generation import template
+
+    _enable_generation_diagnostics(caplog)
+    article = make_article(812, title="LoRA fine-tuning for low-resource NLP")
+    source = "LoRA enables fine-tuning in low-resource NLP settings."
+    _patch_generation_case(
+        monkeypatch,
+        template,
+        article,
+        source,
+        claim_offsets=(1, len(source) + 1),
+    )
+
+    draft, _ = template.generate("LoRA fine-tuning in low-resource NLP")
+
+    diagnostics = _last_generation_diagnostics(caplog)
+    assert diagnostics["claims"]["offsets"] == {
+        "provided": 1,
+        "valid": 0,
+        "invalid_but_source_recovered": 1,
+    }
+    evidence_sentences = [sentence for sentence in draft.sentences if sentence.evidence]
+    assert evidence_sentences[0].evidence[0].passage == source
+
+
+@pytest.mark.parametrize(
+    ("query", "language"),
+    [
+        ("كيف تعمل LoRA في الموارد المحدودة؟", "ar"),
+        ("Quels effets de LoRA dans les ressources faibles ?", "fr"),
+    ],
+)
+def test_translated_queries_keep_original_question_and_use_english_evidence(
+    monkeypatch, query, language
+):
+    from scilit.generation import template
+
+    article = make_article(813, title="LoRA fine-tuning for low-resource NLP")
+    source = "LoRA enables fine-tuning in low-resource NLP settings."
+    _patch_generation_case(monkeypatch, template, article, source)
+    translation = "LoRA fine-tuning in low-resource settings"
+    monkeypatch.setattr(
+        template,
+        "_parallel_english_query",
+        lambda text, detected: (translation, f"available:fixture-{language}"),
+    )
+
+    draft, _ = template.generate(query)
+
+    assert draft.title.endswith(query.title())
+    assert any(sentence.evidence for sentence in draft.sentences)
+
+
+def test_unassociated_claim_is_diagnosed_without_fabricating_review(
+    monkeypatch, caplog
+):
+    from scilit.generation import template
+
+    _enable_generation_diagnostics(caplog)
+    article = make_article(810, title="LoRA fine-tuning for low-resource NLP")
+    source = "LoRA enables fine-tuning in low-resource NLP settings."
+    retrieved_chunk = uuid5(article.id, "query-evidence-fixture")
+    missing_chunk = uuid5(article.id, "claim-from-another-chunk")
+    _patch_generation_case(
+        monkeypatch,
+        template,
+        article,
+        source,
+        claim_chunk_id=missing_chunk,
+    )
+
+    with pytest.raises(template.InsufficientRelevantEvidence):
+        template.generate("LoRA fine-tuning in low-resource NLP")
+
+    diagnostics = _last_generation_diagnostics(caplog)
+    assert diagnostics["retrieval"]["chunks"] == 1
+    assert diagnostics["claims"]["associated_with_retrieved_chunks"] == 0
+    assert diagnostics["claims"]["not_associated_with_retrieved_chunks"] == 1
+    assert diagnostics["consistency"]["claims_missing_from_chunks_jsonl"] == 1
+    assert retrieved_chunk != missing_chunk
+
+
+def test_empty_retrieval_and_no_eligible_claims_have_distinct_diagnostics(
+    monkeypatch, caplog
+):
+    from scilit.generation import template
+
+    _enable_generation_diagnostics(caplog)
+    article = make_article(811, title="LoRA fine-tuning for low-resource NLP")
+    source = "LoRA enables fine-tuning in low-resource NLP settings."
+    _patch_generation_case(
+        monkeypatch,
+        template,
+        article,
+        source,
+        retrieval=False,
+    )
+    with pytest.raises(template.InsufficientRelevantEvidence, match="No chunks were retrieved"):
+        template.generate("LoRA fine-tuning in low-resource NLP")
+    empty_diagnostics = _last_generation_diagnostics(caplog)
+    assert empty_diagnostics["retrieval"]["chunks"] == 0
+    assert empty_diagnostics["claims"]["associated_with_retrieved_chunks"] == 0
+
+    caplog.clear()
+    _patch_generation_case(
+        monkeypatch,
+        template,
+        article,
+        "DeBERTa achieves strong language understanding results.",
+    )
+    with pytest.raises(
+        template.InsufficientRelevantEvidence,
+        match="No complete, source-verifiable claims matched",
+    ):
+        template.generate("LoRA fine-tuning in low-resource NLP")
+    no_claim_diagnostics = _last_generation_diagnostics(caplog)
+    assert no_claim_diagnostics["retrieval"]["chunks"] == 1
+    assert no_claim_diagnostics["claims"]["associated_with_retrieved_chunks"] == 1
+    assert no_claim_diagnostics["claims"]["rejections"]["irrelevant"] == 1
+    assert sum(no_claim_diagnostics["claims"]["rejections"].values()) == 1
+    assert no_claim_diagnostics["claims"]["final_eligible"] == 0
+
+
+def test_zero_relevance_regression_keeps_supported_claims_and_rejects_noise(
+    monkeypatch, caplog
+):
+    """Synthetic 44-claim case: relevant one-anchor claims survive context check."""
+    from scilit.generation import template
+
+    _enable_generation_diagnostics(caplog)
+    article = make_article(
+        815,
+        title="Memory-efficient adaptation of neural language models",
+    )
+    query = "How does LoRA help memory-efficient adaptation?"
+    relevant_claims = [
+        "LoRA uses low-rank updates instead of changing every model weight.",
+        "LoRA adds a compact matrix while preserving pretrained parameters.",
+        "LoRA freezes pretrained weights and updates small low-rank factors.",
+    ]
+    unrelated_claims = [
+        f"The optimizer converges after {index + 1} epochs with a cosine schedule."
+        for index in range(36)
+    ]
+    incomplete_claims = [
+        "LoRA uses low-rank updates without changing every weight"
+        for _ in range(5)
+    ]
+    source_claims = relevant_claims + unrelated_claims + incomplete_claims
+    chunk_id = uuid5(article.id, "zero-relevance-regression-chunk")
+    claims = []
+    source_parts = []
+    cursor = 0
+    for index, source in enumerate(source_claims):
+        if index:
+            cursor += 1  # newline separator between exact source sentences
+        start = cursor
+        end = start + len(source)
+        source_parts.append(source)
+        claims.append({
+            "id": str(uuid5(chunk_id, f"claim:{index}")),
+            "article_id": str(article.id),
+            "chunk_id": str(chunk_id),
+            "claim_type": "finding",
+            "text": source,
+            "verbatim": source,
+            "char_start": start,
+            "char_end": end,
+        })
+        cursor = end
+    chunk_text = "\n".join(source_parts)
+    ranked = RankedResult(
+        query_id=UUID(int=9815),
+        chunk_id=chunk_id,
+        article_id=article.id,
+        section_type=SectionType.ABSTRACT,
+        chunk_text=chunk_text,
+        bm25_rank=1,
+        dense_rank=1,
+        rrf_score=0.03,
+        final_rank=1,
+    )
+    monkeypatch.setattr(
+        template,
+        "_load_articles",
+        lambda: {str(article.id): article.model_dump(mode="json")},
+    )
+    monkeypatch.setattr(template, "_load_claims", lambda: claims)
+    monkeypatch.setattr(
+        template,
+        "_load_chunk_metadata",
+        lambda: {str(chunk_id): {
+            "article_id": str(article.id),
+            "text": chunk_text,
+            "char_start": 0,
+            "char_end": len(chunk_text),
+        }},
+    )
+    monkeypatch.setattr(template, "retrieve", lambda *args, **kwargs: [ranked])
+
+    draft, _ = template.generate(query, k=10, max_sentences_per_type=5)
+
+    diagnostics = _last_generation_diagnostics(caplog)
+    assert diagnostics["claims"]["associated_with_retrieved_chunks"] == 44
+    assert diagnostics["claims"]["complete"] == 39
+    assert diagnostics["claims"]["verbatim_in_chunk"] == 39
+    assert diagnostics["claims"]["relevance_pass"] == 3
+    assert diagnostics["claims"]["rejections"]["incomplete"] == 5
+    assert diagnostics["claims"]["rejections"]["irrelevant"] == 36
+    relevance = diagnostics["relevance"]
+    assert relevance["variants"]["original"]["meaningful_terms_after_filter"] > 0
+    assert relevance["variants"]["original"]["claim_overlap"] == {
+        "zero": 36,
+        "one": 3,
+        "multiple": 0,
+    }
+    assert relevance["variants"]["original"]["title_context_passes"] == 3
+    assert relevance["accepted_by"]["original"] == 3
+    assert len([sentence for sentence in draft.sentences if sentence.evidence]) > 0
+    assert all(
+        sentence.evidence[0].passage in relevant_claims
+        for sentence in draft.sentences
+        if sentence.evidence
+    )
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_rejection"),
+    [
+        ({"claim_article_id": "wrong-article"}, "article_id_mismatch"),
+        ({"metadata_article_id": "wrong-article"}, "retrieved_chunk_inconsistent"),
+        ({"metadata_missing": True}, "missing_chunk_metadata"),
+    ],
+)
+def test_claim_metadata_mismatches_keep_their_rejection_reasons(
+    monkeypatch, caplog, case, expected_rejection
+):
+    from scilit.generation import template
+
+    _enable_generation_diagnostics(caplog)
+    article = make_article(816, title="LoRA fine-tuning for low-resource NLP")
+    source = "LoRA enables fine-tuning in low-resource NLP settings."
+    _patch_generation_case(monkeypatch, template, article, source, **case)
+
+    with pytest.raises(template.InsufficientRelevantEvidence):
+        template.generate("LoRA fine-tuning in low-resource NLP")
+
+    diagnostics = _last_generation_diagnostics(caplog)
+    assert diagnostics["claims"]["rejections"][expected_rejection] == 1
+    assert diagnostics["claims"]["relevance_pass"] == 0
+
+
+def test_translation_does_not_bypass_exact_source_verification(monkeypatch, caplog):
+    from scilit.generation import template
+
+    _enable_generation_diagnostics(caplog)
+    article = make_article(817, title="LoRA fine-tuning for low-resource NLP")
+    source = "LoRA enables fine-tuning in low-resource NLP settings."
+    changed_claim = source[:-1] + " and improves robustness."
+    _patch_generation_case(
+        monkeypatch,
+        template,
+        article,
+        source,
+        claim_text=changed_claim,
+    )
+    monkeypatch.setattr(
+        template,
+        "_parallel_english_query",
+        lambda *_: ("LoRA fine-tuning for low-resource NLP", "available:fixture-fr"),
+    )
+
+    with pytest.raises(template.InsufficientRelevantEvidence):
+        template.generate("Quels effets de LoRA dans les ressources faibles ?")
+
+    diagnostics = _last_generation_diagnostics(caplog)
+    assert diagnostics["translation"] == "available:fixture-fr"
+    assert diagnostics["claims"]["rejections"]["not_verbatim_in_source"] == 1
+    assert diagnostics["claims"]["relevance_pass"] == 0
+
+
+def test_generation_diagnostics_do_not_log_query_or_source_text(monkeypatch, caplog):
+    from scilit.generation import template
+
+    _enable_generation_diagnostics(caplog)
+    article = make_article(814, title="Private fixture title")
+    query = "private query phrase about LoRA low-resource NLP"
+    source = "Private evidence phrase: LoRA improves low-resource NLP adaptation."
+    _patch_generation_case(monkeypatch, template, article, source)
+
+    template.generate(query)
+
+    assert "generation_stages" in caplog.text
+    assert query not in caplog.text
+    assert source not in caplog.text
+
+
+def test_generate_api_hides_unexpected_internal_errors(monkeypatch):
+    from fastapi import HTTPException
+    from scilit.api.main import GenerateRequest
+    from scilit.api.main import generate as generate_endpoint
+    from scilit.generation import template
+
+    def fail_generation(**kwargs):
+        raise RuntimeError("private corpus path and secret token")
+
+    monkeypatch.setattr(template, "generate", fail_generation)
+    with pytest.raises(HTTPException) as exc_info:
+        generate_endpoint(GenerateRequest(query="LoRA fine-tuning"))
+
+    assert exc_info.value.status_code == 500
+    assert "private corpus path" not in exc_info.value.detail
+    assert "secret token" not in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        "No chunks were retrieved (retrieval_queries=[]).",
+        "No complete, source-verifiable claims matched the query after the recorded stages.",
+    ],
+)
+def test_generate_api_returns_actionable_evidence_errors(monkeypatch, diagnostic):
+    from fastapi import HTTPException
+    from scilit.api.main import GenerateRequest
+    from scilit.api.main import generate as generate_endpoint
+    from scilit.generation import template
+
+    def reject_query(**kwargs):
+        raise template.InsufficientRelevantEvidence(diagnostic)
+
+    monkeypatch.setattr(template, "generate", reject_query)
+    with pytest.raises(HTTPException) as exc_info:
+        generate_endpoint(GenerateRequest(query="LoRA fine-tuning"))
+
+    assert exc_info.value.status_code == 422
+    assert diagnostic in exc_info.value.detail
 
 
 def test_nli_does_not_use_an_unlinked_chunk_as_sentence_support():

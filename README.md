@@ -26,7 +26,9 @@ Python 3.10 or newer is required.
 4. Start the API so `API_HOST`, `API_PORT`, and `APP_ENV` are applied:
 
    ```bash
-   python -m scilit.api.main
+   python -m scilit.api.main 
+   or 
+   .\.venv\Scripts\python.exe -m scilit.api.main
    ```
 
    Interactive API docs: `http://127.0.0.1:8000/docs` (adjust the host/port to your `.env`).
@@ -67,7 +69,9 @@ Query-term matching recognizes Arabic script, French accents, and English techni
 
 ### Generation diagnostics
 
-Each generation writes a structured `generation_stages` log entry with the detected language, translation status, result counts per query variant, retrieved chunks/articles, claim links, complete claims, verbatim source matches, relevance passes, and data-consistency mismatches. Retrieval also logs index metadata checks against current `chunks.jsonl` (unknown chunk IDs, article-ID mismatches, and text-preview mismatches). An insufficient-evidence response includes the key stage counts, suggests increasing top-k where possible, and points to the mismatch counters. SciLit does not rebuild the corpus or indexes automatically.
+Each generation writes a structured `generation_stages` log entry without the raw query, query terms, or source passages. Retrieval counts distinguish returned chunks from chunks with current metadata, matching article IDs, and matching source text. `associated_with_retrieved_chunks` counts claims whose chunk IDs occur in the retrieved set; `not_associated_with_retrieved_chunks` is the remaining corpus-wide claim count, not a claim rejection. `complete`, `verbatim_in_chunk`, and `relevance_pass` are cumulative stage-pass counts. Relevance diagnostics report distinct query-token counts before and after filtering, per-variant claim-overlap histograms, title-context passes, and aggregate rejection reasons without recording text. A relevance pass requires at least one meaningful query term in the claim itself; for longer queries a second distinct term may corroborate the claim from the article title, but the title cannot pass by itself. The `rejections` map assigns each associated claim to only its first failing check; its comparison count applies only when a comparison gate rejects a set of otherwise relevant claims. `final_eligible` counts source-backed claims actually included in the generated draft. Offset counters distinguish valid offsets from an invalid offset recovered by an exact text search. Comparison counters report the number of source candidates per side and missing sides without logging the side text.
+
+Retrieval also logs index metadata checks against current `chunks.jsonl` (unknown chunk IDs, article-ID mismatches, and text-preview mismatches). Empty retrieval and retrieved-but-ineligible evidence have distinct 422 errors; the latter includes claim-stage counts. Unexpected generation failures are logged server-side and returned as a generic API error. SciLit does not rebuild the corpus or indexes automatically.
 
 ## Frozen retrieval evaluation
 

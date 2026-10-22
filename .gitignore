@@ -26,3 +26,6 @@ data/parsed/*
 models/
 .env
 .vscode/settings.json
+data/server/
+data/supervisor/
+scilit/data/

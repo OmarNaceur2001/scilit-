@@ -1,80 +1,64 @@
 {
-  "review_id": "a81458c4-75df-4c38-a7ce-14bdb381a816",
+  "review_id": "7c9b2431-d9dd-4bf3-bb7d-7bd93a464da9",
   "entries": [
     {
-      "review_id": "a81458c4-75df-4c38-a7ce-14bdb381a816",
-      "sentence_text": "This paper identifies the phenomenon, characterizes its fiveprincipal forms, explains the asymmetry that makes it particularly costly in high-stakes settings, andoutlines the design requirements for s",
-      "cited_key": "Jason2022BNAI",
+      "review_id": "7c9b2431-d9dd-4bf3-bb7d-7bd93a464da9",
+      "sentence_text": "To understand what types of content and to which extent LLMs are apt to hallucinate, we introduce the Hallucination Evaluation benchmark for Large Language Models (HaluEval), a large collection of gen",
+      "cited_key": "Li2023HaluEval",
       "status": "verified",
       "auditor": "auto_nli",
-      "note": "entailment_threshold_met | nli_entail=0.9637"
+      "note": "automatic_nli_entailment_indicator | entailment_probability=0.9715"
     },
     {
-      "review_id": "a81458c4-75df-4c38-a7ce-14bdb381a816",
-      "sentence_text": "We do not describe such a systemin detail here.",
-      "cited_key": "Jason2022BNAI",
+      "review_id": "7c9b2431-d9dd-4bf3-bb7d-7bd93a464da9",
+      "sentence_text": "We present taxonomies of the LLM hallucination phenomena and evaluation benchmarks, analyze existing approaches aiming at mitigating LLM hallucination, and discuss potential directions for future rese",
+      "cited_key": "Zhang2025Sirens",
       "status": "verified",
       "auditor": "auto_nli",
-      "note": "entailment_threshold_met | nli_entail=0.9906"
+      "note": "automatic_nli_entailment_indicator | entailment_probability=0.9837"
     },
     {
-      "review_id": "a81458c4-75df-4c38-a7ce-14bdb381a816",
+      "review_id": "7c9b2431-d9dd-4bf3-bb7d-7bd93a464da9",
       "sentence_text": "To investigate it, this work presents the first systematic study on object hallucination of LVLMs.",
       "cited_key": "Li2023Evaluating",
       "status": "verified",
       "auditor": "auto_nli",
-      "note": "entailment_threshold_met | nli_entail=0.9880"
+      "note": "automatic_nli_entailment_indicator | entailment_probability=0.9880"
     },
     {
-      "review_id": "a81458c4-75df-4c38-a7ce-14bdb381a816",
-      "sentence_text": "We find that the LLM models repeat or elaborate on the planted error in up to 83 % of cases.",
-      "cited_key": "Omar2025Multimodel",
+      "review_id": "7c9b2431-d9dd-4bf3-bb7d-7bd93a464da9",
+      "sentence_text": "Generation of plausible yet incorrect factual information, termed hallucination, is an unsolved issue in large language models.",
+      "cited_key": "Dhuliawala2024ChainofVerification",
       "status": "verified",
       "auditor": "auto_nli",
-      "note": "entailment_threshold_met | nli_entail=0.9820"
+      "note": "automatic_nli_entailment_indicator | entailment_probability=0.9318"
     },
     {
-      "review_id": "a81458c4-75df-4c38-a7ce-14bdb381a816",
-      "sentence_text": "A total of 178 references listed by ChatGPT achieves 78.0 f 1.",
-      "cited_key": "Athaluri2023Exploring",
-      "status": "exists_no_support",
-      "auditor": "auto_nli",
-      "note": "no_entailment | nli_entail=0.0002"
-    },
-    {
-      "review_id": "a81458c4-75df-4c38-a7ce-14bdb381a816",
-      "sentence_text": "Prompt-based mitigation lowers the overall hallucination rate (mean across all models) from 66 % to 44 % (p < 0.001).",
-      "cited_key": "Omar2025Multimodel",
-      "status": "verified",
-      "auditor": "auto_nli",
-      "note": "entailment_threshold_met | nli_entail=0.9854"
-    },
-    {
-      "review_id": "a81458c4-75df-4c38-a7ce-14bdb381a816",
-      "sentence_text": "How that our approach has considerably higher AUC-PR scores in sentence-level hallucination detection and higher correlation scores in passage-level factuality assessment compared to grey-box methods.",
-      "cited_key": "Manakul2023SelfCheckGPT",
-      "status": "verified",
-      "auditor": "auto_nli",
-      "note": "entailment_threshold_met | nli_entail=0.9707"
-    },
-    {
-      "review_id": "a81458c4-75df-4c38-a7ce-14bdb381a816",
-      "sentence_text": "A noted limitation: Large language models (LLMs), such as Chat-GPT, are prone to generate hallucinations, i.e., content that conflicts with the source or cannot be verified by the factual knowledge.",
-      "cited_key": "Li2023HaluEval",
-      "status": "verified",
-      "auditor": "auto_nli",
-      "note": "entailment_threshold_met | nli_entail=0.9135"
-    },
-    {
-      "review_id": "a81458c4-75df-4c38-a7ce-14bdb381a816",
-      "sentence_text": "Esent taxonomies of the LLM hallucination phenomena and evaluation benchmarks, analyze existing approaches aiming at mitigating LLM hallucination, and discuss potential directions for future research.",
+      "review_id": "7c9b2431-d9dd-4bf3-bb7d-7bd93a464da9",
+      "sentence_text": "Abstract While large language models (LLMs) have demonstrated remarkable capabilities across a range of downstream tasks, a significant concern revolves around their propensity to exhibit hallucinatio",
       "cited_key": "Zhang2025Sirens",
       "status": "verified",
       "auditor": "auto_nli",
-      "note": "entailment_threshold_met | nli_entail=0.9383"
+      "note": "automatic_nli_entailment_indicator | entailment_probability=0.8797"
+    },
+    {
+      "review_id": "7c9b2431-d9dd-4bf3-bb7d-7bd93a464da9",
+      "sentence_text": "We conduct the evaluation experiments on several representative LVLMs, and show that they mostly suffer from severe object hallucination issues.",
+      "cited_key": "Li2023Evaluating",
+      "status": "verified",
+      "auditor": "auto_nli",
+      "note": "automatic_nli_entailment_indicator | entailment_probability=0.9929"
+    },
+    {
+      "review_id": "7c9b2431-d9dd-4bf3-bb7d-7bd93a464da9",
+      "sentence_text": "Large language models (LLMs), such as Chat-GPT, are prone to generate hallucinations, i.e., content that conflicts with the source or cannot be verified by the factual knowledge.",
+      "cited_key": "Li2023HaluEval",
+      "status": "verified",
+      "auditor": "auto_nli",
+      "note": "automatic_nli_entailment_indicator | entailment_probability=0.9673"
     }
   ],
-  "audited_at": "2026-10-14T13:16:37.558583Z",
+  "audited_at": "2026-10-22T15:04:56.101685Z",
   "invented_rate": 0.0,
-  "support_rate": 0.8888888888888888
+  "support_rate": 1.0
 }
