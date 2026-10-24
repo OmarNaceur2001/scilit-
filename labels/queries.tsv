@@ -1,0 +1,31 @@
+theme	query_en	query_fr
+tokenization	How does subword tokenization such as BPE handle rare and unseen words?	Comment la tokenisation en sous-mots comme BPE gère-t-elle les mots rares et inconnus ?
+tokenization	Byte-level versus subword tokenizers for multilingual language models	Tokeniseurs au niveau des octets ou en sous-mots pour les modèles de langue multilingues
+syntax_semantics	Neural dependency parsing with biaffine attention	Analyse syntaxique en dépendances neuronale avec attention biaffine
+syntax_semantics	Do pretrained language models encode syntactic structure?	Les modèles de langue pré-entraînés encodent-ils la structure syntaxique ?
+word_embeddings	Comparison of word2vec, GloVe and fastText word embeddings	Comparaison des plongements de mots word2vec, GloVe et fastText
+word_embeddings	How do subword-based embeddings improve representations for morphologically rich languages?	Comment les plongements basés sur les sous-mots améliorent-ils les langues morphologiquement riches ?
+embeddings	Contrastive learning for sentence embeddings	Apprentissage contrastif pour les plongements de phrases
+embeddings	Dense retrieval versus BM25 for open-domain question answering	Recherche dense ou BM25 pour la question-réponse en domaine ouvert
+attention	What do attention heads learn in transformer models?	Qu'apprennent les têtes d'attention dans les modèles Transformer ?
+attention	Is attention weight a faithful explanation of model predictions?	Les poids d'attention expliquent-ils fidèlement les prédictions du modèle ?
+attention	Efficient attention mechanisms for long documents	Mécanismes d'attention efficaces pour les documents longs
+pretrained_lm	Masked language modeling versus autoregressive pretraining	Modélisation masquée ou pré-entraînement autorégressif
+pretrained_lm	Stability problems when fine-tuning BERT on small datasets	Problèmes de stabilité lors du fine-tuning de BERT sur de petits jeux de données
+peft	LoRA versus full fine-tuning in low-resource settings	LoRA ou fine-tuning complet en faibles ressources
+peft	Adapter modules for parameter-efficient transfer learning	Modules adaptateurs pour un transfert efficace en paramètres
+peft	Fine-tuning quantized large language models on a single GPU	Fine-tuning de grands modèles de langue quantifiés sur un seul GPU
+prompting	Does chain-of-thought prompting improve reasoning in large language models?	Le prompting en chaîne de pensée améliore-t-il le raisonnement des grands modèles ?
+prompting	Instruction tuning for zero-shot generalization	Instruction tuning pour la généralisation zero-shot
+prompting	Why do in-context learning demonstrations work?	Pourquoi les démonstrations en apprentissage en contexte fonctionnent-elles ?
+rag	How does retrieval-augmented generation reduce hallucination?	Comment la génération augmentée par la recherche réduit-elle les hallucinations ?
+rag	How do language models use long retrieved contexts?	Comment les modèles de langue utilisent-ils de longs contextes récupérés ?
+hallucination	Methods for detecting hallucinations in LLM outputs without external resources	Méthodes de détection des hallucinations des LLM sans ressources externes
+hallucination	Evaluating the factual consistency of generated summaries	Évaluer la cohérence factuelle des résumés générés
+hallucination	Benchmarks measuring the truthfulness of language models	Benchmarks mesurant la véracité des modèles de langue
+multilingual_arabic	Pretrained language models for Arabic and Arabic dialects	Modèles de langue pré-entraînés pour l'arabe et ses dialectes
+multilingual_arabic	Cross-lingual transfer to low-resource languages with multilingual models	Transfert interlingue vers des langues peu dotées avec des modèles multilingues
+scientific_nlp	Classifying the intent of citations in scientific papers	Classer l'intention des citations dans les articles scientifiques
+scientific_nlp	Language models pretrained on scientific text	Modèles de langue pré-entraînés sur des textes scientifiques
+evaluation_robustness	Behavioral testing of NLP models beyond accuracy	Tests comportementaux des modèles de NLP au-delà de l'exactitude
+evaluation_robustness	Robustness of NLP models to adversarial perturbations	Robustesse des modèles de NLP aux perturbations adverses
