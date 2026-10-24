@@ -1,0 +1,19 @@
+{
+  "rules": 0.34401657740047115,
+  "tfidf": 0.7241092688907314,
+  "scibert_mean": 0.759606922865304,
+  "scibert_std": 0.004889064766853755,
+  "scibert_seeds": {
+    "13": 0.7641824078489422,
+    "42": 0.7618084046177293,
+    "2024": 0.7528299561292404
+  },
+  "bootstrap_p_scibert_vs_tfidf": 0.0,
+  "per_label_scibert": {
+    "background": 0.82,
+    "objective": 0.636,
+    "method": 0.735,
+    "result": 0.735,
+    "other": 0.895
+  }
+}
