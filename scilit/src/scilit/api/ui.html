@@ -1,232 +1,207 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="UTF-8">
-  <title>SciLit — Assistant de revue de littérature</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, sans-serif; background: #f5f7fa; color: #1a1a2e; min-height: 100vh; }
-    header { background: #1a1a2e; color: white; padding: 20px 40px; display: flex; align-items: center; gap: 12px; }
-    header h1 { font-size: 1.4rem; font-weight: 600; }
-    header span { background: #4CAF50; color: white; font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; }
-    .container { max-width: 860px; margin: 40px auto; padding: 0 20px; }
-    .search-box { background: white; border-radius: 12px; padding: 28px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); margin-bottom: 24px; }
-    .search-box h2 { font-size: 1rem; color: #555; margin-bottom: 14px; }
-    .input-row { display: flex; gap: 10px; }
-    input[type=text] { flex: 1; padding: 12px 16px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1rem; outline: none; transition: border 0.2s; }
-    input[type=text]:focus { border-color: #1a1a2e; }
-    .btn { padding: 12px 22px; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; font-weight: 600; transition: opacity 0.2s; }
-    .btn:hover { opacity: 0.85; }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-primary { background: #1a1a2e; color: white; }
-    .btn-secondary { background: #e8f5e9; color: #2e7d32; }
-    .options { margin-top: 12px; display: flex; gap: 20px; align-items: center; font-size: 0.88rem; color: #666; }
-    .options label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
-    .result-box { background: white; border-radius: 12px; padding: 28px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); display: none; }
-    .result-box.visible { display: block; }
-    .result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; flex-wrap: wrap; gap: 10px; }
-    .result-title { font-size: 1.15rem; font-weight: 700; color: #1a1a2e; }
-    .stats { display: flex; gap: 12px; flex-wrap: wrap; }
-    .badge { padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; }
-    .badge-green { background: #e8f5e9; color: #2e7d32; }
-    .badge-blue { background: #e3f2fd; color: #1565c0; }
-    .badge-orange { background: #fff3e0; color: #e65100; }
-    .sentences { margin-top: 14px; }
-    .sentence { padding: 12px 14px; border-left: 3px solid #e0e0e0; margin-bottom: 10px; border-radius: 0 6px 6px 0; background: #fafafa; font-size: 0.93rem; line-height: 1.55; }
-    .sentence.verified { border-left-color: #4CAF50; background: #f1f8e9; }
-    .sentence.unverifiable { border-left-color: #90a4ae; }
-    .sentence.hallucinated { border-left-color: #f44336; background: #ffebee; }
-    .sentence-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; color: #888; }
-    .bib-btn { margin-top: 18px; }
-    .search-results { margin-top: 14px; }
-    .chunk { padding: 12px; background: #fafafa; border: 1px solid #eee; border-radius: 6px; margin-bottom: 8px; font-size: 0.88rem; }
-    .chunk-meta { font-size: 0.75rem; color: #999; margin-bottom:4px; }
-    .score { background: #1a1a2e; color: white; border-radius: 4px; padding: 1px 6px; font-size: 0.72rem; }
-    .spinner { display: none; text-align: center; padding: 30px; color: #888; font-size: 0.95rem; }
-    .spinner.visible { display: block; }
-    .error { background: #ffebee; color: #c62828; padding: 14px; border-radius: 8px; font-size: 0.9rem; display: none; }
-    .error.visible { display: block; }
-    .tabs { display: flex; gap: 2px; margin-bottom: 18px; border-bottom: 2px solid #eee; }
-    .tab { padding: 8px 18px; cursor: pointer; font-size: 0.9rem; border-bottom: 2px solid transparent; margin-bottom: -2px; color: #888; }
-    .tab.active { color: #1a1a2e; font-weight: 600; border-bottom-color: #1a1a2e; }
-    .tab-content { display: none; }
-    .tab-content.active { display: block; }
-  </style>
-</head>
-<body>
+<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SciLit · États de l'art vérifiés</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48' width='40' height='40'><rect width='48' height='48' rx='14' fill='%23cfe9d9'/><rect x='11' y='9' width='20' height='26' rx='3' fill='%23fff' stroke='%2314294b' stroke-width='2.2'/><path d='M15 16h12M15 21h12M15 26h7' stroke='%2314294b' stroke-width='2' stroke-linecap='round'/><circle cx='31' cy='30' r='8' fill='%23fff' stroke='%232f7d5b' stroke-width='2.6'/><path d='m27.6 30 2.3 2.3 4-4.4' fill='none' stroke='%232f7d5b' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/><path d='m36.8 35.8 4.2 4.2' stroke='%232f7d5b' stroke-width='3' stroke-linecap='round'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#14294b;--ink2:#56627a;--green:#2f7d5b;--green-dk:#24634a;--mint:#e8f5ed;--mint2:#cfe9d9;--sky:#e3eefa;--sky-ink:#2c5a92;
+--peach:#fbe2d6;--ochre:#9a6a12;--ochre-soft:#fbf0d9;--red:#b42318;--red-soft:#fde8e6;--line:#e3ebe6;--sans:"Outfit",-apple-system,"Segoe UI",sans-serif;--serif:"DM Serif Display",Georgia,serif}
+*{box-sizing:border-box;margin:0;padding:0}html{scroll-behavior:smooth}
+body{font:15px/1.6 var(--sans);color:var(--ink);background:#fbfdfb}
+.wrap{max-width:1160px;margin:auto;padding:0 24px}
+.topbar{position:sticky;top:0;z-index:10;background:#fbfdfbe6;backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .wrap{display:flex;align-items:center;gap:26px;height:72px}
+.logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)}.logo b{font-size:1.25rem}.logo b i{font-style:normal;color:var(--green)}
+.logo small{display:block;font-size:.72rem;color:var(--ink2);margin-top:-3px}
+.links{display:flex;gap:22px;margin-left:auto}.links a{color:var(--ink);text-decoration:none;font-weight:500;font-size:.92rem}.links a:hover{color:var(--green)}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:13px 22px;border-radius:12px;border:2px solid transparent;font:600 .92rem var(--sans);cursor:pointer;text-decoration:none;transition:.15s}
+.btn.primary{background:var(--green);color:#fff;box-shadow:0 10px 22px -12px rgba(47,125,91,.8)}.btn.primary:hover{background:var(--green-dk)}
+.btn.ghost{background:#fff;color:var(--ink);border-color:var(--ink)}.btn.ghost:hover{background:var(--mint)}
+.btn.soft{background:var(--sky);color:var(--sky-ink)}.btn:disabled{opacity:.55;cursor:wait}
+.hero{padding:56px 0 30px}.hero .wrap{display:grid;grid-template-columns:1.05fr .95fr;gap:30px;align-items:center}
+.hi{color:var(--green);font-weight:600}
+h1{font:700 3.1rem/1.08 var(--sans);letter-spacing:-.025em;margin:10px 0 16px}h1 em{font-style:normal;color:var(--green);background:linear-gradient(transparent 62%,var(--mint2) 62%)}
+.lead{color:var(--ink2);font-size:1.05rem;max-width:520px;margin-bottom:24px}
+.ask{display:flex;gap:10px;background:#fff;border:2px solid var(--ink);border-radius:16px;padding:6px;box-shadow:6px 6px 0 var(--mint2);max-width:560px}
+.ask input{flex:1;border:0;padding:10px 12px;font:500 1rem var(--sans);color:var(--ink);background:transparent;min-width:0}.ask input:focus{outline:none}
+.actions{display:flex;gap:12px;margin-top:16px;flex-wrap:wrap}
+.langs{margin-top:20px;font-size:.85rem;color:var(--ink2);display:flex;gap:8px;align-items:center}.langs span{background:#fff;border:1px solid var(--line);border-radius:8px;padding:2px 9px;font-weight:600;color:var(--ink)}
+.art{width:100%;height:auto}
+.wave{background:var(--mint);position:relative;padding:60px 0;margin-top:30px}
+.wave:before,.wave:after{content:"";position:absolute;left:0;right:0;height:40px;background:var(--mint);border-radius:50% 50% 0 0/100% 100% 0 0}.wave:before{top:-20px}.wave:after{bottom:-20px;border-radius:0 0 50% 50%/0 0 100% 100%}
+.wave.sky,.wave.sky:before,.wave.sky:after{background:var(--sky)}
+.about{display:grid;grid-template-columns:1fr 1.2fr;gap:40px;align-items:center}
+.kicker{color:var(--green);font-weight:600;font-size:.88rem}
+h2{font:700 2rem/1.15 var(--sans);letter-spacing:-.02em;margin:4px 0 12px}h2 u{text-decoration:none;background:linear-gradient(transparent 65%,var(--mint2) 65%)}
+.wave h2 u{background:linear-gradient(transparent 65%,#fff 65%)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:18px}
+.stat b{display:block;font-size:1.5rem;margin-top:8px}.stat span{color:var(--ink2);font-size:.82rem}
+.ico{display:inline-grid;place-items:center;width:46px;height:46px;border-radius:13px}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-top:26px}
+.card{background:#fff;border-radius:18px;padding:22px;box-shadow:0 14px 30px -22px rgba(20,41,75,.35);transition:.2s}.card:hover{transform:translateY(-4px)}
+.card h3{font-size:1.1rem;margin:14px 0 6px}.card p{color:var(--ink2);font-size:.88rem}.card a{display:inline-block;margin-top:12px;color:var(--ink);font-weight:600;font-size:.85rem;text-decoration:none}
+section.block{padding:70px 0}.head{display:flex;justify-content:space-between;align-items:end;gap:20px;flex-wrap:wrap}.head p{color:var(--ink2);max-width:420px}
+.tool{background:#fff;border:2px solid var(--ink);border-radius:22px;box-shadow:8px 8px 0 var(--mint2);overflow:hidden;margin-top:24px}
+.tabs{display:flex;gap:6px;padding:12px;background:var(--mint);border-bottom:2px solid var(--ink);flex-wrap:wrap}
+.tabs button{all:unset;cursor:pointer;padding:9px 16px;border-radius:10px;font-weight:600;font-size:.9rem;color:var(--ink2)}.tabs button.on{background:var(--ink);color:#fff}
+.tab{display:none;padding:24px 26px;min-height:240px}.tab.on{display:block;animation:fade .25s}@keyframes fade{from{opacity:0;transform:translateY(5px)}to{opacity:1}}
+.sub{color:var(--ink2);font-size:.9rem;margin-bottom:14px}
+.result{display:grid;grid-template-columns:44px 1fr;gap:10px;padding:14px;border-radius:14px;margin:6px 0}.result:hover{background:var(--mint)}
+.rank{width:40px;height:40px;border-radius:12px;background:var(--mint2);display:grid;place-items:center;font-weight:700}
+.result h3{font-size:1rem;line-height:1.35}.meta{color:var(--ink2);font-size:.8rem;margin:3px 0 6px}
+.chip{font-size:.7rem;font-weight:600;padding:3px 10px;border-radius:999px;background:var(--sky);color:var(--sky-ink)}
+.passage{color:#3f4a60;font-size:.92rem}mark{background:var(--mint2);color:var(--ink);padding:0 4px;border-radius:5px;font-weight:600}
+.num{font-weight:700;color:var(--green)}
+.s{padding:14px 16px;border-radius:14px;margin:10px 0;background:var(--mint);font-size:1rem;line-height:1.7;border:1.5px solid #bfe2cc}
+.s.removed{background:var(--red-soft);border-color:#f5c6c0;font-size:.93rem;color:#5a4b4b}.s.removed.insufficient{background:var(--ochre-soft);border-color:#f0dcb0}
+.st{font-size:.66rem;font-weight:700;padding:3px 9px;border-radius:999px;margin-right:10px;text-transform:uppercase;letter-spacing:.05em;background:#fff}
+.supported{color:var(--green)}.insufficient{color:var(--ochre)}.contradicted,.number_mismatch,.misattributed,.not_found{color:var(--red)}
+.cite{font-size:.78rem;font-weight:700;color:var(--sky-ink);background:#fff;border-radius:999px;padding:2px 8px;margin-left:6px;cursor:pointer}
+.ev{display:none;margin-top:10px;padding:12px;background:#fff;border-radius:10px;font-size:.85rem;color:var(--ink2)}.ev b{color:var(--ink)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.kpi{background:var(--sky);border-radius:16px;padding:16px}.kpi b{display:block;font-size:1.7rem;line-height:1.1}.kpi span{font-size:.8rem;color:var(--ink2)}
+.kpi.hl{background:var(--green)}.kpi.hl b,.kpi.hl span{color:#fff}
+.scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.86rem}
+th{text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ink2);padding:10px;border-bottom:2px solid var(--ink)}
+td{padding:11px 10px;border-bottom:1px solid var(--line);vertical-align:top}tr.best td{background:var(--mint)}
+.na{color:#a3adbd;font-style:italic}pre{white-space:pre-wrap;font-size:.8rem;background:var(--mint);padding:14px;border-radius:12px}
+.steps{list-style:none;counter-reset:s;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.steps li{counter-increment:s;background:var(--mint);border-radius:14px;padding:12px 14px 12px 54px;position:relative;font-size:.9rem}
+.steps li:before{content:counter(s);position:absolute;left:14px;top:12px;width:28px;height:28px;border-radius:9px;background:#fff;display:grid;place-items:center;font-weight:700;color:var(--green)}
+.empty{color:var(--ink2);text-align:center;padding:36px}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--mint2);border-top-color:var(--green);border-radius:50%;animation:r 1s linear infinite;vertical-align:-2px;margin-right:8px}@keyframes r{to{transform:rotate(360deg)}}
+.examples{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:24px}
+.ex{border-radius:18px;padding:20px;cursor:pointer;border:2px solid var(--ink);background:#fff;transition:.2s}.ex:hover{transform:translateY(-4px);box-shadow:6px 6px 0 var(--mint2)}
+.ex .t{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:3px 9px;border-radius:999px;display:inline-block}
+.ex p{font-weight:600;margin:12px 0 10px;line-height:1.4}.ex small{color:var(--green);font-weight:600}
+.cta .wrap{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}.cta h2{font-size:2.2rem}
+footer{background:var(--ink);color:#c9d2e3;padding:46px 0 26px;margin-top:40px}
+footer .wrap{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:26px}footer h4{color:#fff;margin-bottom:10px;font-size:.95rem}
+footer a,footer p{color:#c9d2e3;font-size:.86rem;text-decoration:none;display:block;line-height:1.9}footer .logo{color:#fff}footer .logo small{color:#9fb0cc}
+.copy{text-align:center;font-size:.78rem;color:#8193b3;margin-top:28px}
+@media(max-width:900px){.hero .wrap,.about{grid-template-columns:1fr}.cards,.examples,.stats{grid-template-columns:1fr 1fr}.links{display:none}footer .wrap{grid-template-columns:1fr 1fr}.steps{grid-template-columns:1fr}h1{font-size:2.3rem}}
+</style></head><body>
+<header class="topbar"><div class="wrap"><a class="logo" href="#top"><svg viewBox="0 0 48 48" width="40" height="40" aria-hidden="true"><rect width="48" height="48" rx="14" fill="#cfe9d9"/><rect x="11" y="9" width="20" height="26" rx="3" fill="#fff" stroke="#14294b" stroke-width="2.2"/><path d="M15 16h12M15 21h12M15 26h7" stroke="#14294b" stroke-width="2" stroke-linecap="round"/><circle cx="31" cy="30" r="8" fill="#fff" stroke="#2f7d5b" stroke-width="2.6"/><path d="m27.6 30 2.3 2.3 4-4.4" fill="none" stroke="#2f7d5b" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="m36.8 35.8 4.2 4.2" stroke="#2f7d5b" stroke-width="3" stroke-linecap="round"/></svg><div><b>Sci<i>Lit</i></b><small>États de l'art vérifiés</small></div></a>
+<nav class="links"><a href="#top">Accueil</a><a href="#how">Fonctionnement</a><a href="#tool">Outil</a><a href="#examples">Exemples</a><a href="#tool" onclick="show('eval')">Évaluation</a></nav>
+<a class="btn primary" href="#tool">Essayer →</a></div></header>
 
-<header>
-  <h1>🔬 SciLit</h1>
-  <span>Bronze</span>
-  <span style="background:#555; font-size:0.7rem; padding:2px 8px; border-radius:10px;">1500 articles NLP</span>
-</header>
+<section class="hero" id="top"><div class="wrap"><div>
+<div class="hi">Assistant de revue de littérature en NLP 🔬</div>
+<h1>Des états de l'art <em>vérifiés</em>, phrase par phrase</h1>
+<p class="lead">SciLit retrouve les articles pertinents, compare leurs méthodes et leurs résultats, puis rédige une synthèse dont chaque phrase est confrontée au passage qu'elle cite. Aucune citation inventée.</p>
+<div class="ask"><input id="q" value="LoRA vs full fine-tuning in low-resource settings"><button class="btn primary" onclick="go('search')">Rechercher</button></div>
+<div class="actions"><button class="btn primary" id="gen" onclick="go('review')">Générer une revue vérifiée →</button><button class="btn ghost" onclick="doBib()">Exporter BibTeX ⤓</button></div>
+<div class="langs">Questions en <span>EN</span><span>FR</span><span>AR</span> · modèles ouverts, exécutés en local</div>
+</div><div><svg viewBox="0 0 520 420" class="art" aria-hidden="true">
+<path d="M70 210c0-110 90-180 200-175 120 5 210 70 200 180-9 105-95 175-215 170C135 380 70 320 70 210z" fill="#dff1e6"/>
+<g fill="#14294b"><path d="M60 80l4 12 12 4-12 4-4 12-4-12-12-4 12-4z"/><path d="M455 60l3 9 9 3-9 3-3 9-3-9-9-3 9-3z"/><path d="M470 330l3 8 8 3-8 3-3 8-3-8-8-3 8-3z"/></g>
+<circle cx="100" cy="300" r="4" fill="#9fd3b4"/><circle cx="430" cy="140" r="5" fill="#b9d8f2"/>
+<g transform="rotate(-8 230 210)"><rect x="150" y="95" width="170" height="220" rx="14" fill="#fff" stroke="#14294b" stroke-width="3"/></g>
+<rect x="175" y="85" width="170" height="220" rx="14" fill="#fff" stroke="#14294b" stroke-width="3"/>
+<rect x="195" y="108" width="90" height="12" rx="6" fill="#14294b"/>
+<g stroke="#c9d3e3" stroke-width="7" stroke-linecap="round"><path d="M195 140h130M195 160h130M195 180h100M195 220h130M195 240h115"/></g>
+<path d="M195 200h75" stroke="#9fd3b4" stroke-width="9" stroke-linecap="round"/><path d="M195 260h60" stroke="#b9d8f2" stroke-width="9" stroke-linecap="round"/>
+<circle cx="335" cy="235" r="58" fill="#ffffffcc" stroke="#2f7d5b" stroke-width="9"/><path d="m377 277 48 48" stroke="#2f7d5b" stroke-width="16" stroke-linecap="round"/>
+<path d="m308 236 18 18 34-38" fill="none" stroke="#2f7d5b" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+<g><rect x="370" y="95" width="104" height="44" rx="22" fill="#fff" stroke="#14294b" stroke-width="2.5"/><circle cx="394" cy="117" r="11" fill="#2f7d5b"/><path d="m389 117 4 4 7-8" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/><text x="412" y="122" font-family="Outfit,sans-serif" font-size="14" font-weight="600" fill="#14294b">vérifié</text></g>
+<g><rect x="60" y="150" width="96" height="40" rx="20" fill="#fff" stroke="#14294b" stroke-width="2.5"/><text x="80" y="175" font-family="Outfit,sans-serif" font-size="14" font-weight="600" fill="#2c5a92">[E3] ✓</text></g>
+<g transform="translate(95 300)"><path d="M10 40h44l-6 46H16z" fill="#f6c9b9" stroke="#14294b" stroke-width="2.5"/><path d="M32 40c-2-20 6-34 20-40-4 16-10 28-20 40zM32 40c-4-16-14-26-26-28 2 14 12 24 26 28zM32 40c6-12 18-18 30-16-6 10-16 16-30 16z" fill="#7cc49a" stroke="#14294b" stroke-width="2"/></g>
+</svg></div></div></section>
 
-<div class="container">
-  <div class="search-box">
-    <h2>Posez votre question de recherche</h2>
-    <div class="input-row">
-      <input type="text" id="query" placeholder="ex: transformer attention mechanism NLP" value="hallucination language model" />
-      <button class="btn btn-secondary" onclick="doSearch()">🔍 Rechercher</button>
-      <button class="btn btn-primary" onclick="doGenerate()">📝 Générer une revue</button>
-    </div>
-    <div class="options">
-      <label><input type="radio" name="mode" value="rrf" checked> RRF (hybride)</label>
-      <label><input type="radio" name="mode" value="bm25"> BM25</label>
-      <label><input type="radio" name="mode" value="dense"> Dense</label>
-      <span style="margin-left:auto;">Top-k : <input type="number" id="topk" value="10" min="1" max="50" style="width:55px; padding:4px 6px; border:1px solid #ddd; border-radius:4px;"></span>
-    </div>
-  </div>
+<section class="wave"><div class="wrap about"><div>
+<div class="kicker">Le corpus</div><h2>Lire 1 100 articles <u>pour vous</u></h2>
+<p class="sub" style="font-size:1rem">13 thèmes du module de NLP, de la tokenisation aux hallucinations, collectés en accès ouvert, contrôlés, découpés et indexés. Chaque chiffre ci-contre est mesuré par le pipeline.</p></div>
+<div class="stats" id="stats">
+<div class="stat"><span class="ico" style="background:#d6efdf"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#14294b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/></svg></span><b id="k-papers">—</b><span>articles structurés</span></div>
+<div class="stat"><span class="ico" style="background:#dce9f8"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#14294b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></svg></span><b id="k-chunks">—</b><span>passages indexés</span></div>
+<div class="stat"><span class="ico" style="background:#fbe2d6"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#14294b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h4v4c0 3-2 5-4 6M15 7h4v4c0 3-2 5-4 6"/></svg></span><b id="k-cit">—</b><span>F1 fonction des citations</span></div>
+<div class="stat"><span class="ico" style="background:#e7e1f6"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#14294b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg></span><b>0</b><span>citation inventée conservée</span></div></div></div></section>
 
-  <div class="spinner" id="spinner">⏳ Traitement en cours...</div>
-  <div class="error" id="error"></div>
+<section class="block" id="how"><div class="wrap"><div class="head"><div><div class="kicker">Fonctionnement</div><h2>Quatre étapes, <u>toutes mesurées</u></h2></div>
+<p>Chaque composant est comparé à une baseline classique et évalué sur un jeu de test figé.</p></div>
+<div class="cards">
+<div class="card"><span class="ico" style="background:#d6efdf"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#14294b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg></span><h3>Recherche hybride</h3><p>BM25 et BGE-M3 multilingue, fusion RRF, puis réordonnancement par cross-encoder.</p><a href="#tool" onclick="show('search')">Voir les résultats →</a></div>
+<div class="card"><span class="ico" style="background:#dce9f8"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#14294b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg></span><h3>Extraction</h3><p>SciBERT repère question, méthode, résultats ; règles pour données, limites et chiffres.</p><a href="#tool" onclick="show('table')">Tableau comparatif →</a></div>
+<div class="card"><span class="ico" style="background:#fbe2d6"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#14294b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m4 20 4-1 11-11-3-3L5 16z"/><path d="m14 7 3 3"/></svg></span><h3>Génération ancrée</h3><p>Qwen2.5-7B en local n'écrit qu'à partir de preuves numérotées, et doit les citer.</p><a href="#tool" onclick="show('review')">Lire une revue →</a></div>
+<div class="card"><span class="ico" style="background:#e7e1f6"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#14294b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6z"/><path d="m9 12 2 2 4-4"/></svg></span><h3>Vérification</h3><p>Existence, attribution, chiffres et implication (NLI) : seules les phrases soutenues restent.</p><a href="#tool" onclick="show('eval')">Voir l'évaluation →</a></div>
+</div></div></section>
 
-  <div class="result-box" id="result">
-    <div class="tabs">
-      <div class="tab active" onclick="switchTab('review')">Revue générée</div>
-      <div class="tab" onclick="switchTab('search')">Résultats de recherche</div>
-    </div>
-    <div class="tab-content active" id="tab-review">
-      <div class="result-header">
-        <div class="result-title" id="review-title">—</div>
-        <div class="stats" id="review-stats"></div>
-      </div>
-      <div class="sentences" id="sentences"></div>
-      <div class="bib-btn">
-        <button class="btn btn-secondary" onclick="downloadBib()" id="bib-btn">📄 Télécharger BibTeX</button>
-      </div>
-    </div>
-    <div class="tab-content" id="tab-search">
-      <div class="search-results" id="search-results"></div>
-    </div>
-  </div>
-</div>
+<section class="wave sky" id="tool"><div class="wrap"><div class="head"><div><div class="kicker">L'outil</div><h2>Votre question, <u>vos sources</u></h2></div><p>Cliquez sur une citation pour lire le passage exact qui la soutient.</p></div>
+<div class="tool"><div class="tabs" id="nav"><button data-t="search" class="on">Résultats</button><button data-t="review">Revue vérifiée</button><button data-t="table">Tableau comparatif</button><button data-t="eval">Évaluation</button><button data-t="method">Méthode</button></div>
+<section class="tab on" id="t-search"><div id="search"><p class="empty">Lancez une recherche depuis le haut de la page, ou choisissez un exemple plus bas.</p></div></section>
+<section class="tab" id="t-review"><div id="review"><p class="empty">Chaque phrase générée sera confrontée au passage qu'elle cite.</p></div></section>
+<section class="tab" id="t-table"><p class="sub">La grille de lecture du module. Chaque cellule est une phrase de l'article, jamais une paraphrase.</p><div class="scroll" id="table"><p class="empty">Disponible après une revue.</p></div></section>
+<section class="tab" id="t-eval"><div id="eval"><p class="empty">Chargement…</p></div></section>
+<section class="tab" id="t-method"><ol class="steps">
+<li><b>Corpus.</b> OpenAlex par thème, graines vérifiées par identifiant, snowballing, correction arXiv, déduplication.</li>
+<li><b>Contrôle qualité.</b> PDF lisible, couche texte, anglais (fastText), titre en page 1.</li>
+<li><b>Parsing.</b> PyMuPDF, colonnes, sections par règles, phrases (pySBD), citations reliées.</li>
+<li><b>Découpage.</b> Paragraphes dans leurs sections, en-tête « Titre › Section ».</li>
+<li><b>Recherche.</b> BM25 + BGE-M3, RRF, cross-encoder bge-reranker-v2-m3.</li>
+<li><b>Extraction.</b> SciBERT sur CSAbstruct (0,76 macro-F1), hedging, chiffres.</li>
+<li><b>Citations.</b> SciBERT sur SciCite (0,855 macro-F1, résultat publié reproduit).</li>
+<li><b>Génération.</b> Qwen2.5-7B local, citer ou s'abstenir, sortie JSON.</li>
+<li><b>Vérification.</b> Existence, attribution, chiffres, NLI DeBERTa-v3.</li>
+</ol></section></div></div></section>
 
+<section class="block" id="examples"><div class="wrap"><div class="head"><div><div class="kicker">Exemples</div><h2>Questions <u>à essayer</u></h2></div><p>Tirées des 30 requêtes de test. Cliquez pour lancer la recherche.</p></div>
+<div class="examples">
+<div class="ex" onclick="ask(this)"><span class="t" style="background:#d6efdf">PEFT</span><p>LoRA versus full fine-tuning in low-resource settings</p><small>Rechercher →</small></div>
+<div class="ex" onclick="ask(this)"><span class="t" style="background:#dce9f8">RAG</span><p>How does retrieval-augmented generation reduce hallucination?</p><small>Rechercher →</small></div>
+<div class="ex" onclick="ask(this)"><span class="t" style="background:#fbe2d6">Multilingue</span><p>Modèles de langue pré-entraînés pour l'arabe et ses dialectes</p><small>Rechercher →</small></div>
+<div class="ex" onclick="ask(this)"><span class="t" style="background:#e7e1f6">Attention</span><p>Is attention weight a faithful explanation of model predictions?</p><small>Rechercher →</small></div>
+</div></div></section>
+
+<section class="wave cta"><div class="wrap"><h2>Une question de recherche ?<br>Laissez SciLit <u>lire pour vous</u>.</h2><a class="btn primary" href="#top" onclick="setTimeout(()=>$('q').focus(),400)">Poser une question →</a></div></section>
+
+<footer><div class="wrap"><div><a class="logo" href="#top"><svg viewBox="0 0 48 48" width="40" height="40" aria-hidden="true"><rect width="48" height="48" rx="14" fill="#cfe9d9"/><rect x="11" y="9" width="20" height="26" rx="3" fill="#fff" stroke="#14294b" stroke-width="2.2"/><path d="M15 16h12M15 21h12M15 26h7" stroke="#14294b" stroke-width="2" stroke-linecap="round"/><circle cx="31" cy="30" r="8" fill="#fff" stroke="#2f7d5b" stroke-width="2.6"/><path d="m27.6 30 2.3 2.3 4-4.4" fill="none" stroke="#2f7d5b" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="m36.8 35.8 4.2 4.2" stroke="#2f7d5b" stroke-width="3" stroke-linecap="round"/></svg><div><b>Sci<i>Lit</i></b><small>États de l'art vérifiés</small></div></a><p style="margin-top:12px">Projet P6 du module de NLP · 2026-2027.<br>Modèles ouverts, aucune API payante.</p></div>
+<div><h4>Navigation</h4><a href="#top">Accueil</a><a href="#how">Fonctionnement</a><a href="#tool">Outil</a><a href="#examples">Exemples</a></div>
+<div><h4>Modèles</h4><p>BGE-M3 · bge-reranker-v2-m3</p><p>SciBERT · DeBERTa-v3 NLI</p><p>Qwen2.5-7B (Ollama)</p></div>
+<div><h4>Données</h4><p>OpenAlex · arXiv</p><p>CSAbstruct · SciCite</p><a href="/docs">Documentation API</a></div></div>
+<div class="copy">SciLit assiste la lecture, il ne la remplace pas : lisez les articles cités.</div></footer>
 <script>
-const API = window.location.origin;
-let currentSlug = null;
-let lastSearchResults = [];
+const $=id=>document.getElementById(id),q=()=>$('q').value,esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let ids=[];
+const STOP=new Set('the and for with from that this what how does are into over between versus vs les des une pour avec dans sur est qui que'.split(' '));
+function hl(t){let h=esc(t);const w=q().toLowerCase().split(/[^\p{L}\p{N}-]+/u).filter(x=>x.length>3&&!STOP.has(x));
+ w.forEach(x=>{const safe=x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');h=h.replace(new RegExp('(?<![\\p{L}\\p{N}])('+safe+'[\\p{L}\\p{N}-]*)','giu'),'<mark>$1</mark>')});
+ return h.replace(/(?<![\w.\-])(\d+(?:\.\d+)?%?)(?![\w.\-])/g,'<span class="num">$1</span>')}
+const wait=m=>`<p class="empty"><span class="spin"></span>${m}</p>`;const LABEL={supported:'soutenue',insufficient:'insuffisante',contradicted:'contredite',number_mismatch:'chiffre faux',misattributed:'mal attribuée',not_found:'source inventée'};
+function show(t){document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));document.querySelectorAll('.tab').forEach(s=>s.classList.toggle('on',s.id==='t-'+t));if(t==='eval')loadEval()}
+$('nav').onclick=e=>{if(e.target.dataset.t)show(e.target.dataset.t)};
+async function doSearch(){show('search');$('search').innerHTML=wait('Recherche dans 68 510 passages…');
+ const r=await (await fetch('/search?q='+encodeURIComponent(q()))).json();ids=r.results.map(x=>x.paper_id);
+ $('search').innerHTML=`<h2>${r.results.length} articles</h2><p class="sub">BM25 + BGE-M3 → RRF → cross-encoder · ${r.latency_s} s</p>`+r.results.map(x=>
+ `<div class="result"><div class="rank">${String(x.rank).padStart(2,'0')}</div><div><h3>${esc(x.title)}</h3><div class="meta"><span class="chip">${esc((x.section||'').replace('_',' '))}</span></div><div class="passage">${hl(x.text.slice(0,460))}…</div></div></div>`).join('')}
+async function doReview(){const b=$('gen');b.disabled=true;show('review');$('review').innerHTML=wait('Recherche, rédaction et vérification de chaque phrase… (1 à 2 minutes)');
+ try{const r=await (await fetch('/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q()})})).json();
+ ids=r.table.map(x=>x.paper_id);const ev=Object.fromEntries(r.evidence.map(e=>[e.id,e]));const c=r.counts;const n=r.sentences.length;
+ const kept=r.sentences.filter(s=>s.status==='supported'),rem=r.sentences.filter(s=>s.status!=='supported');
+ const sent=(s,i)=>`<div class="s ${s.status==='supported'?'':'removed '+s.status}"><span class="st ${s.status}">${LABEL[s.status]}</span>${hl(s.text)}`+
+  s.cites.map(id=>`<span class="cite" onclick="tog('e${i}${id}')">[${id}${ev[id]?' · '+esc(ev[id].first_author.split(' ').pop())+' '+ev[id].year:''}]</span>`).join('')+
+  s.cites.filter(id=>ev[id]).map(id=>`<div class="ev" id="e${i}${id}"><b>${esc(ev[id].title)}</b><br>${hl(ev[id].text)}</div>`).join('')+'</div>';
+ $('review').innerHTML=`<div class="kpis"><div class="kpi hl"><b>${c.supported}/${n}</b><span>phrases soutenues</span></div>
+  <div class="kpi"><b>${n-c.supported}</b><span>retirées par la vérification</span></div><div class="kpi"><b>${c.not_found+c.misattributed}</b><span>citations inventées / mal attribuées</span></div>
+  <div class="kpi"><b>${(r.latency_s.search+r.latency_s.generation+r.latency_s.verification).toFixed(0)} s</b><span>latence totale</span></div></div>
+  <h2>Revue (phrases soutenues)</h2><p class="sub">Cliquez sur une citation pour voir le passage source.</p>${kept.map(sent).join('')||'<p class="empty">Aucune phrase soutenue.</p>'}
+  ${rem.length?'<h2 style="margin-top:18px">Retirées par la vérification</h2>'+rem.map((s,i)=>sent(s,'r'+i)).join(''):''}`;
+ const cell=x=>x?esc(x.text.slice(0,180)):'<span class="na">non rapporté</span>';
+ $('table').innerHTML='<table><tr><th>Article</th><th>Question</th><th>Méthode</th><th>Données</th><th>Résultats</th><th>Limites</th></tr>'+r.table.map(x=>
+  `<tr><td class="paper"><b>${esc(x.title)}</b><br><span class="meta">${esc(x.first_author)} · ${x.year}</span></td><td>${cell(x.question)}</td><td>${cell(x.method)}</td><td>${cell(x.data)}</td><td>${cell(x.results)}</td><td>${cell(x.limits)}</td></tr>`).join('')+'</table>';
+ }catch(e){$('review').innerHTML='<p class="empty">Erreur : vérifiez qu\'Ollama est lancé.</p>'}b.disabled=false}
+function tog(id){const e=$(id);e.style.display=e.style.display==='block'?'none':'block'}
+async function doBib(){if(!ids.length){alert("Faites d'abord une recherche.");return}const t=await (await fetch('/bibtex?ids='+ids.join(','))).text();
+ show('search');$('search').insertAdjacentHTML('afterbegin',`<h2>BibTeX</h2><pre>${esc(t)}</pre>`)}
+async function loadEval(){const s=await (await fetch('/stats')).json();const f=v=>v==null?'—':(+v).toFixed(3);
+ $('eval').innerHTML=`<h2>Résultats mesurés</h2><p class="sub">Calculés par le pipeline sur les jeux de test, lus depuis <code>reports/</code>. Ligne surlignée : meilleur système.</p>
+ <div class="kpis"><div class="kpi hl"><b>${s.papers}</b><span>articles structurés</span></div><div class="kpi"><b>${s.chunks.toLocaleString('fr')}</b><span>passages indexés</span></div>
+ <div class="kpi"><b>${f(s.roles?.scibert_mean)}</b><span>macro-F1 rôles (SciBERT)</span></div><div class="kpi"><b>${f(s.citfunc?.scibert_mean)}</b><span>macro-F1 citations (SciCite)</span></div></div>
+ <h2>Recherche (30 requêtes de test)</h2><div class="scroll"><table><tr><th>Système</th><th>Recall@10</th><th>MRR</th><th>nDCG@10</th></tr>${s.retrieval.map((r,i,a)=>`<tr class="${+r.ndcg10===Math.max(...a.map(z=>+z.ndcg10))?'best':''}"><td>${esc(r.system)}</td><td>${r.recall10}</td><td>${r.mrr}</td><td>${r.ndcg10}</td></tr>`).join('')}</table></div>
+ <h2 style="margin-top:18px">Classifieurs</h2><table><tr><th>Tâche</th><th>Règles</th><th>TF-IDF + LR</th><th>SciBERT (3 graines)</th></tr>
+ <tr><td>Rôle des phrases (CSAbstruct)</td><td>${f(s.roles?.rules)}</td><td>${f(s.roles?.tfidf)}</td><td>${f(s.roles?.scibert_mean)} ± ${f(s.roles?.scibert_std)}</td></tr>
+ <tr><td>Fonction des citations (SciCite)</td><td>—</td><td>${f(s.citfunc?.tfidf)}</td><td>${f(s.citfunc?.scibert_mean)} ± ${f(s.citfunc?.scibert_std)}</td></tr></table>`}
 
-function getMode() { return document.querySelector('input[name=mode]:checked').value; }
-function getK()    { return parseInt(document.getElementById('topk').value) || 10; }
-function getQuery(){ return document.getElementById('query').value.trim(); }
-
-function show(id)  { document.getElementById(id).classList.add('visible'); }
-function hide(id)  { document.getElementById(id).classList.remove('visible'); }
-
-function switchTab(name) {
-  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['review','search'][i]===name));
-  document.querySelectorAll('.tab-content').forEach((t,i) => t.classList.toggle('active', ['tab-review','tab-search'][i]==='tab-'+name));
-}
-
-function slugify(s) { return s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').substring(0,60); }
-
-async function doSearch() {
-  const q = getQuery(); if (!q) return;
-  hide('result'); hide('error');
-  show('spinner'); document.getElementById('spinner').textContent = '🔍 Recherche en cours...';
-  try {
-    const r = await fetch(`${API}/search`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({query:q, k:getK(), mode:getMode()})
-    });
-    if (!r.ok) throw new Error(await r.text());
-    const data = await r.json();
-    lastSearchResults = data.results;
-    renderSearch(data);
-    switchTab('search');
-    show('result');
-  } catch(e) {
-    document.getElementById('error').textContent = '❌ Erreur : ' + e.message;
-    show('error');
-  } finally { hide('spinner'); }
-}
-
-async function doGenerate() {
-  const q = getQuery(); if (!q) return;
-  hide('result'); hide('error');
-  show('spinner'); document.getElementById('spinner').textContent = '📝 Génération de la revue (BM25 + Dense + RRF + NLI)...';
-  try {
-    const r = await fetch(`${API}/generate`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({query:q, k:getK(), run_nli:true})
-    });
-    if (!r.ok) throw new Error(await r.text());
-    const data = await r.json();
-    currentSlug = data.slug;
-    renderReview(data, q);
-    switchTab('review');
-    show('result');
-  } catch(e) {
-    document.getElementById('error').textContent = '❌ Erreur : ' + e.message;
-    show('error');
-  } finally { hide('spinner'); }
-}
-
-function renderReview(data, query) {
-  document.getElementById('review-title').textContent = data.title || ('Revue : ' + query);
-  const stats = document.getElementById('review-stats');
-  const halluPct = (data.hallucination_rate * 100).toFixed(0);
-  const suppPct  = (data.support_rate * 100).toFixed(0);
-  stats.innerHTML = `
-    <span class="badge badge-blue">${data.n_sentences} phrases</span>
-    <span class="badge badge-blue">${data.n_bibtex} références</span>
-    <span class="badge badge-green">✓ ${suppPct}% vérifiées</span>
-    <span class="badge ${halluPct>0?'badge-orange':'badge-green'}">⚠ ${halluPct}% hallucinées</span>`;
-
-  const slug = data.slug || slugify(query);
-  currentSlug = slug;
-
-  fetch(`${API}/review/${slug}_verified`)
-    .then(r => r.ok ? r.json() : fetch(`${API}/review/${slug}`).then(r2=>r2.json()))
-    .then(rev => {
-      const container = document.getElementById('sentences');
-      container.innerHTML = '';
-      (rev.sentences||[]).forEach((s,i) => {
-        const st = (s.verification_statuses||[])[0] || 'unverifiable';
-        const nli = s.nli_score != null ? ` · NLI=${(s.nli_score*100).toFixed(0)}%` : '';
-        const cls = st === 'verified' ? 'verified' : st === 'hallucinated' ? 'hallucinated' : 'unverifiable';
-        container.innerHTML += `<div class="sentence ${cls}">
-          <div class="sentence-label">${st}${nli}</div>
-          ${escHtml(s.text)}
-        </div>`;
-      });
-    })
-    .catch(() => {
-      document.getElementById('sentences').innerHTML = `<p style="color:#888">Chargement du contenu...</p>`;
-    });
-}
-
-function renderSearch(data) {
-  const container = document.getElementById('search-results');
-  container.innerHTML = `<p style="color:#888;font-size:0.85rem;margin-bottom:12px;">${data.results.length} résultats — mode <strong>${data.mode.toUpperCase()}</strong></p>`;
-  data.results.forEach(r => {
-    const score = r.rrf_score != null ? `rrf=${r.rrf_score.toFixed(4)}` : (r.bm25_rank ? `bm25 #${r.bm25_rank}` : `dense #${r.dense_rank}`);
-    container.innerHTML += `<div class="chunk">
-      <div class="chunk-meta">#${r.rank} · <span class="score">${score}</span> · ${r.section_type} · article ${r.article_id.substring(0,8)}</div>
-      ${escHtml((r.preview||'').substring(0,280))}${r.preview && r.preview.length>280?'…':''}
-    </div>`;
-  });
-}
-
-async function downloadBib() {
-  if (!currentSlug) return;
-  try {
-    const r = await fetch(`${API}/export/bibtex/${currentSlug}`);
-    if (!r.ok) throw new Error('BibTeX non trouvé');
-    const blob = await r.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href=url; a.download=currentSlug+'.bib'; a.click();
-    URL.revokeObjectURL(url);
-  } catch(e) { alert('Erreur BibTeX : '+e.message); }
-}
-
-function escHtml(s) {
-  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-document.getElementById('query').addEventListener('keydown', e => {
-  if (e.key === 'Enter') doGenerate();
-});
-</script>
-</body>
-</html>
+function go(t){document.getElementById('tool').scrollIntoView();t==='search'?doSearch():doReview()}
+function ask(el){$('q').value=el.querySelector('p').textContent;go('search')}
+fetch('/stats').then(r=>r.json()).then(s=>{$('k-papers').textContent=s.papers.toLocaleString('fr');$('k-chunks').textContent=s.chunks.toLocaleString('fr');$('k-cit').textContent=s.citfunc?(+s.citfunc.scibert_mean).toFixed(3):'—'}).catch(()=>{});
+</script></body></html>

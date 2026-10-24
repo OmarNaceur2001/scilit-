@@ -1,383 +1,98 @@
 """
-SciLit — api/main.py
-=====================
-Étape 9 : API FastAPI Bronze.
+SciLit - api/main.py
+Part 13: FastAPI app over the pipeline (the same code that produced the evaluation numbers).
 
-Endpoints :
-  GET  /                        — health check + stats corpus
-  POST /search                  — retrieval BM25/Dense/RRF
-  POST /generate                — génération + NLI en une passe
-  GET  /review/{slug}           — lire un ReviewDraft sauvegardé
-  GET  /export/bibtex/{slug}    — télécharger le .bib d'une review
-  GET  /claims                  — lister/filtrer les claims
+  GET  /              web page (style of the original SciLit UI)
+  GET  /search?q=     hybrid search -> papers + best passage
+  POST /review        {query, generator: llm|template} -> table + verified sentences + counts
+  GET  /bibtex?ids=   BibTeX for paper IDs (comma-separated)
+  GET  /docs          automatic API documentation
 
-Usage :
-  uvicorn scilit.api.main:app --reload --port 8000
-  # puis ouvrir http://localhost:8000/docs
+Usage: uvicorn scilit.api.main:app --port 8000   then open http://127.0.0.1:8000
 """
 from __future__ import annotations
 
-import json
-import logging
-from functools import lru_cache
-from typing import Literal
-
+import re
+import time
 from pathlib import Path
-from fastapi.responses import HTMLResponse
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, Query
+from fastapi.responses import HTMLResponse, PlainTextResponse
+from pydantic import BaseModel
 
-from scilit import config
+from scilit.corpus.arxiv_meta import surname
+from scilit.generation import review as R
+from scilit.generation.table import articles, build_table
+from scilit.retrieval.search import Searcher
 
-log = logging.getLogger(__name__)
+app = FastAPI(title="SciLit", description="Verified literature-review assistant")
+searcher = Searcher()
 
-# ─────────────────────────────────────────────────────────────
-# App
-# ─────────────────────────────────────────────────────────────
 
-app = FastAPI(
-    title        = config.APP_NAME,
-    description  = f"{config.APP_NAME} literature-review assistant — ESPRIT NLP 2026-2027",
-    version      = "0.2.0",
-    docs_url     = "/docs",
-    redoc_url    = "/redoc",
-)
-@app.get("/ui", response_class=HTMLResponse, include_in_schema=False)
+class ReviewRequest(BaseModel):
+    query: str
+    generator: str = "llm"
+    k: int = 8
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def ui():
     return (Path(__file__).parent / "ui.html").read_text(encoding="utf-8")
 
-PARSED_DIR    = config.PARSED_DIR
-RAW_DIR       = config.RAW_DIR
-REVIEWS_DIR   = config.REVIEWS_DIR
-CLAIMS_PATH   = PARSED_DIR / "claims.jsonl"
-ARTICLES_PATH = RAW_DIR / "articles.jsonl"
+
+@app.get("/search")
+def search(q: str, k: int = 10):
+    t = time.time()
+    res = searcher.search(q, k=k)
+    return {"query": q, "results": res, "latency_s": round(time.time() - t, 2)}
 
 
-# ─────────────────────────────────────────────────────────────
-# Lazy loaders (chargés une seule fois au premier appel)
-# ─────────────────────────────────────────────────────────────
-
-@lru_cache(maxsize=1)
-def _get_retrieval():
-    from scilit.retrieval.pipeline import search
-    return search
-
-
-def _get_claims() -> list[dict]:
-    path = config.paths().parsed / "claims.jsonl"
-    if not path.exists():
-        return []
-    return [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+@app.post("/review")
+def review(req: ReviewRequest):
+    t = {"start": time.time()}
+    results = searcher.search(req.query, k=req.k); t["search"] = time.time()
+    pack = R.evidence_pack(results)
+    draft = R.generate_llm(req.query, pack, "qwen2.5:7b", "English") if req.generator == "llm" else R.generate_template(pack)
+    t["generation"] = time.time()
+    checked = R.verify(draft, pack); t["verification"] = time.time()
+    counts = {s: sum(c["status"] == s for c in checked) for s in
+              ["supported", "insufficient", "contradicted", "number_mismatch", "misattributed", "not_found"]}
+    lat = {k: round(t[k] - t[p], 2) for p, k in zip(["start", "search", "generation"], ["search", "generation", "verification"])}
+    return {"query": req.query, "table": build_table(results), "evidence": pack, "sentences": checked,
+            "counts": counts, "latency_s": lat}
 
 
-def _get_articles() -> dict[str, dict]:
-    path = config.paths().raw / "articles.jsonl"
-    if not path.exists():
-        return {}
-    return {
-        a["id"]: a
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-        for a in [json.loads(line)]
-    }
+@app.get("/bibtex", response_class=PlainTextResponse)
+def bibtex(ids: str = Query(..., description="comma-separated paper IDs")):
+    out = []
+    for pid in ids.split(","):
+        a = articles().get(pid.strip())
+        if not a:
+            continue
+        year = a.get("arxiv_year") or a["year"]
+        word = next((w for w in re.findall(r"[A-Za-z]+", a["title"]) if w.lower() not in {"a", "an", "the", "on", "of"}), "x")
+        key = f"{surname(a['authors'][0]) if a['authors'] else 'anon'}{year}{word.lower()}"
+        fields = {"title": "{" + a["title"] + "}", "author": " and ".join(a["authors"]), "year": str(year)}
+        if a.get("arxiv_id"):
+            fields.update(eprint=a["arxiv_id"], archivePrefix="arXiv", url=f"https://arxiv.org/abs/{a['arxiv_id']}")
+        if a.get("doi") and not a["doi"].startswith("10.48550"):
+            fields["doi"] = a["doi"]
+        out.append(f"@article{{{key},\n" + ",\n".join(f"  {k} = {{{v}}}" for k, v in fields.items()) + "\n}")
+    return "\n\n".join(out)
 
 
-# ─────────────────────────────────────────────────────────────
-# Request / Response schemas
-# ─────────────────────────────────────────────────────────────
-
-class SearchRequest(BaseModel):
-    query: str  = Field(..., min_length=2, json_schema_extra={"example": "hallucination language model"})
-    k:     int  = Field(config.DEFAULT_TOP_K, ge=1, le=50)
-    mode:  Literal["rrf", "bm25", "dense"] = config.RETRIEVAL_MODE
-
-
-class SearchResult(BaseModel):
-    rank:         int
-    chunk_id:     str
-    article_id:   str
-    section_type: str
-    rrf_score:    float | None
-    bm25_rank:    int   | None
-    dense_rank:   int   | None
-    preview:      str
-
-
-class SearchResponse(BaseModel):
-    query:   str
-    mode:    str
-    results: list[SearchResult]
-
-
-class GenerateRequest(BaseModel):
-    query: str = Field(..., min_length=2, json_schema_extra={"example": "transformer attention NLP"})
-    k:     int = Field(config.DEFAULT_TOP_K, ge=5, le=50, description="Top-k chunks retrieval")
-    max_sentences_per_type: int = Field(3, ge=1, le=10)
-    run_nli: bool = Field(True,  description="Lancer la vérification NLI après génération")
-
-
-class GenerateResponse(BaseModel):
-    slug:                    str
-    title:                   str
-    n_sentences:             int
-    n_bibtex:                int
-    hallucination_rate:      float
-    support_rate:            float
-    overall_hallucination_rate: float
-    review_path:             str
-    audit_path:              str | None
-
-
-class ClaimItem(BaseModel):
-    id:          str
-    article_id:  str
-    claim_type:  str
-    hedging:     str
-    text:        str
-    metric_name:  str | None
-    metric_value: float | None
-
-
-# ─────────────────────────────────────────────────────────────
-# Endpoints
-# ─────────────────────────────────────────────────────────────
-
-@app.get("/", summary="Health check + corpus stats")
-def root():
-    paths = config.paths()
-    articles_path = paths.raw / "articles.jsonl"
-    reviews_dir = paths.reviews
-    parsed_dir = paths.parsed
-    n_articles = sum(
-        1 for line in articles_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ) if articles_path.exists() else 0
-    n_claims   = len(_get_claims())
-    n_reviews  = len([
-        f for f in reviews_dir.glob("*.json")
-        if not f.stem.endswith(("_verified", "_audit"))
-    ]) if reviews_dir.exists() else 0
-
-    return {
-        "status":     "ok",
-        "version":    "0.2.0",
-        "corpus":     {"articles": n_articles, "claims": n_claims},
-        "reviews":    n_reviews,
-        "index":      {
-            "bm25":  (parsed_dir / "bm25_index.pkl").exists(),
-            "faiss": (parsed_dir / "faiss_index.bin").exists(),
-        },
-    }
-
-
-@app.post("/search", response_model=SearchResponse, summary="Retrieval BM25 / Dense / RRF")
-def search(req: SearchRequest):
-    search_fn = _get_retrieval()
-    try:
-        ranked = search_fn(req.query, k=req.k, mode=req.mode)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    results = [
-        SearchResult(
-            rank         = r.final_rank,
-            chunk_id     = str(r.chunk_id),
-            article_id   = str(r.article_id),
-            section_type = r.section_type.value,
-            rrf_score    = round(r.rrf_score,  4) if r.rrf_score  is not None else None,
-            bm25_rank    = r.bm25_rank,
-            dense_rank   = r.dense_rank,
-            preview      = r.chunk_text[:200],
-        )
-        for r in ranked
-    ]
-    return SearchResponse(query=req.query, mode=req.mode, results=results)
-
-
-@app.get("/search", response_model=SearchResponse, summary="Retrieval BM25 / Dense / RRF")
-def search_get(
-    q: str = Query(..., min_length=2),
-    k: int = Query(10, ge=1, le=50),
-    mode: Literal["rrf", "bm25", "dense"] = "rrf",
-):
-    return search(SearchRequest(query=q, k=k, mode=mode))
-
-
-@app.get("/articles/{article_id}", summary="Article metadata and extracted claims")
-def get_article(article_id: str):
-    article = _get_articles().get(article_id)
-    if article is None:
-        raise HTTPException(status_code=404, detail=f"Article '{article_id}' not found.")
-    claims = [claim for claim in _get_claims() if claim.get("article_id") == article_id]
-    return {"article": article, "claims": claims}
-
-
-@app.get(
-    "/export/bibtex",
-    response_class=PlainTextResponse,
-    summary="Export BibTeX for article IDs",
-)
-def export_articles_bibtex(ids: str = Query(..., description="Comma-separated article IDs")):
-    articles = _get_articles()
-    requested_ids = [item.strip() for item in ids.split(",") if item.strip()]
-    missing = [article_id for article_id in requested_ids if article_id not in articles]
-    if missing:
-        raise HTTPException(status_code=404, detail=f"Unknown article IDs: {', '.join(missing)}")
-    from scilit.generation.template import _bibtex_key, _make_bibtex
-
-    used_keys: set[str] = set()
-    entries = []
-    for article_id in requested_ids:
-        article = articles[article_id]
-        base_key = _bibtex_key(article)
-        key = base_key
-        suffix = ord("a")
-        while key in used_keys:
-            key = f"{base_key}{chr(suffix)}"
-            suffix += 1
-        used_keys.add(key)
-        entries.append(_make_bibtex(article, key))
-    return "\n\n".join(entry.to_bibtex() for entry in entries)
-
-
-@app.post("/generate", response_model=GenerateResponse, summary="Génération + NLI")
-def generate(req: GenerateRequest):
-
-    from scilit.generation.template import _slugify
-    from scilit.generation.template import generate as gen_fn
-
-    try:
-        draft, bibtex = gen_fn(
-            query                  = req.query,
-            k                      = req.k,
-            max_sentences_per_type = req.max_sentences_per_type,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    slug = _slugify(req.query)
-
-    # ── Sauvegarde template ────────────────────────────────────────────────
-    reviews_dir = config.paths().reviews
-    reviews_dir.mkdir(parents=True, exist_ok=True)
-    review_path = reviews_dir / f"{slug}.json"
-    bib_path    = reviews_dir / f"{slug}.bib"
-    review_path.write_text(draft.model_dump_json(indent=2), encoding="utf-8")
-    bib_path.write_text(
-        "\n\n".join(e.to_bibtex() for e in bibtex),
-        encoding="utf-8",
-    )
-
-    audit_path: str | None = None
-
-    # ── NLI optionnelle ───────────────────────────────────────────────────
-    if req.run_nli:
-        try:
-            from scilit.generation.nli_verify import (
-                _load_articles_lookup,
-                _load_claims_lookup,
-                _load_nli_model,
-                _save,
-                verify_review,
-            )
-            claims_lookup   = _load_claims_lookup()
-            articles_lookup = _load_articles_lookup()
-            tokenizer, nli_model, label2id = _load_nli_model()
-            updated, audit  = verify_review(
-                draft, claims_lookup, articles_lookup,
-                tokenizer, nli_model, label2id,
-            )
-            _save(updated, audit, slug)
-            draft      = updated
-            audit_path = str(reviews_dir / f"{slug}_audit.json")
-        except Exception as e:
-            log.warning("NLI skipped : %s", e)
-
-    return GenerateResponse(
-        slug                     = slug,
-        title                    = draft.title,
-        n_sentences              = len(draft.sentences),
-        n_bibtex                 = len(bibtex),
-        hallucination_rate       = draft.overall_hallucination_rate,
-        support_rate             = draft.overall_support_rate,
-        overall_hallucination_rate = draft.overall_hallucination_rate,
-        review_path              = str(review_path),
-        audit_path               = audit_path,
-    )
-
-
-@app.get("/review/{slug}", summary="Lire un ReviewDraft sauvegardé")
-def get_review(slug: str):
-    reviews_dir = config.paths().reviews
-    # Prefer _verified if it exists
-    for suffix in ("_verified", ""):
-        path = reviews_dir / f"{slug}{suffix}.json"
-        if path.exists():
-            return json.loads(path.read_text(encoding="utf-8"))
-    raise HTTPException(status_code=404, detail=f"Review '{slug}' introuvable.")
-
-
-@app.get(
-    "/export/bibtex/{slug}",
-    response_class = PlainTextResponse,
-    summary        = "Télécharger le BibTeX d'une review",
-)
-def export_bibtex(slug: str):
-    path = config.paths().reviews / f"{slug}.bib"
-    if not path.exists():
-        raise HTTPException(status_code=404, detail=f"BibTeX '{slug}' introuvable.")
-    return PlainTextResponse(
-        content      = path.read_text(encoding="utf-8"),
-        media_type   = "text/plain; charset=utf-8",
-        headers      = {"Content-Disposition": f'attachment; filename="{slug}.bib"'},
-    )
-
-
-@app.get("/claims", response_model=list[ClaimItem], summary="Lister / filtrer les claims")
-def list_claims(
-    claim_type: str | None = Query(None, examples={"default": {"value": "finding"}}),
-    hedging:    str | None = Query(None, examples={"default": {"value": "certain"}}),
-    has_metric: bool | None = Query(None),
-    limit:      int         = Query(50, ge=1, le=500),
-):
-    claims = _get_claims()
-    if claim_type:
-        claims = [c for c in claims if c.get("claim_type") == claim_type]
-    if hedging:
-        claims = [c for c in claims if c.get("hedging_level") == hedging]
-    if has_metric is True:
-        claims = [c for c in claims if c.get("metric_value") is not None]
-    elif has_metric is False:
-        claims = [c for c in claims if c.get("metric_value") is None]
-
-    return [
-        ClaimItem(
-            id           = str(c.get("id", "")),
-            article_id   = str(c.get("article_id", "")),
-            claim_type   = c.get("claim_type", ""),
-            hedging      = c.get("hedging_level", ""),
-            text         = (c.get("text") or "")[:300],
-            metric_name  = c.get("metric_name"),
-            metric_value = c.get("metric_value"),
-        )
-        for c in claims[:limit]
-    ]
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(
-        "scilit.api.main:app",
-        host=config.API_HOST,
-        port=config.API_PORT,
-        reload=config.APP_ENV == "development",
-    )
+@app.get("/stats")
+def stats():
+    """Evaluation results produced by the pipeline (Part 12), read from reports/."""
+    import json
+    rep = Path("reports")
+    read = lambda f: json.loads((rep / f).read_text(encoding="utf-8")) if (rep / f).exists() else None
+    retrieval = []
+    if (rep / "retrieval_eval.md").exists():
+        for line in (rep / "retrieval_eval.md").read_text(encoding="utf-8").splitlines():
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            if len(cells) == 4 and re.match(r"\d", cells[1]):
+                retrieval.append({"system": cells[0], "recall10": cells[1], "mrr": cells[2], "ndcg10": cells[3]})
+    return {"papers": sum(1 for _ in Path("data/parsed/records.jsonl").open(encoding="utf-8")),
+            "chunks": len(searcher.chunks), "retrieval": retrieval,
+            "roles": read("roles_results.json"), "citfunc": read("citfunc_results.json")}
