@@ -5,13 +5,15 @@ Part 7 step 1: sentence-role classifier (background / objective / method / resul
 Gold data: CSAbstruct (Cohan et al., 2019) - computer-science abstracts, every sentence labelled
 by humans. Public, so no AI-made labels (subject rule 2.1). Official train / dev / test split.
 
-Three systems, same test set, macro-F1 (rare roles count as much as frequent ones):
+Three systems, same test set, macro-F1 (rare roles count as much as frequent ones), plus micro-F1
+to compare with the published 83.1 (which is micro-F1, with the whole abstract as context):
   rules    cue phrases ("we propose" -> objective, "outperforms" -> result, ...)   [Lot B]
   tfidf    TF-IDF word 1-2 grams + logistic regression                            [classical]
   scibert  allenai/scibert_scivocab_uncased fine-tuned, 3 seeds, mean +- std      [learned]
-plus a paired bootstrap (1,000 resamples) SciBERT vs TF-IDF on the same test sentences.
+plus a paired bootstrap (1,000 resamples) SciBERT vs TF-IDF on the same test sentences, for every seed.
+The saved model is the seed with the best DEV score: the test set is never used to choose anything.
 
-Output: models/roles_scibert/ (best seed), reports/roles_results.json
+Output: models/roles_scibert/ (seed chosen on dev), reports/roles_results.json
 
 Usage: python -m scilit.extraction.roles
 """
@@ -69,6 +71,11 @@ def macro_f1(gold, pred) -> float:
     return f1_score(gold, pred, labels=LABELS, average="macro", zero_division=0)
 
 
+def micro_f1(gold, pred) -> float:
+    """= accuracy for one label per sentence; the metric the CSAbstruct paper reports."""
+    return f1_score(gold, pred, labels=LABELS, average="micro", zero_division=0)
+
+
 def paired_bootstrap(gold, a, b, n=1000, seed=0) -> float:
     """Share of resamples where system a does NOT beat system b (a one-sided p-value)."""
     rng = np.random.default_rng(seed)
@@ -80,7 +87,9 @@ def paired_bootstrap(gold, a, b, n=1000, seed=0) -> float:
     return worse / n
 
 
-def train_scibert(train, dev, test, seed: int, out_dir: Path | None):
+def train_scibert(train, dev, test, seed: int) -> dict:
+    """Fine-tune SciBERT with one seed. The best EPOCH is chosen on dev. Returns the dev and test
+    scores, the test predictions and the model (moved to CPU, so the caller can keep the best one)."""
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
@@ -108,7 +117,7 @@ def train_scibert(train, dev, test, seed: int, out_dir: Path | None):
         return [LABELS[p] for p in preds]
 
     best_f1, best_state = -1.0, None
-    for epoch in range(3):                         # model selection on DEV, never on test
+    for epoch in range(3):                         # epoch selection on DEV, never on test
         model.train()
         for enc, y in batches(*train, 32, True):
             with torch.autocast(dev_, enabled=dev_ == "cuda"):
@@ -117,43 +126,60 @@ def train_scibert(train, dev, test, seed: int, out_dir: Path | None):
         f1 = macro_f1(dev[1], predict(dev[0]))
         print(f"  seed {seed} epoch {epoch + 1}: dev macro-F1 {f1:.3f}", flush=True)
         if f1 > best_f1:
-            best_f1, best_state = f1, {k: v.detach().clone() for k, v in model.state_dict().items()}
+            best_f1, best_state = f1, {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
     model.load_state_dict(best_state)
     test_pred = predict(test[0])
-    if out_dir:
-        model.save_pretrained(out_dir); tok.save_pretrained(out_dir)
-    return macro_f1(test[1], test_pred), test_pred
+    return {"seed": seed, "dev_f1": best_f1, "test_f1": macro_f1(test[1], test_pred),
+            "test_micro": micro_f1(test[1], test_pred), "test_pred": test_pred, "model": model.cpu(), "tok": tok}
+
+
+def run_seeds(train, dev, test, baseline_pred: list[str], out_dir: Path) -> dict:
+    """3 seeds. Reported: test mean +- std over ALL seeds. Saved model: the seed with the best DEV
+    score (choosing on test would be selection on the test set). Paired bootstrap against the
+    baseline for EVERY seed; the largest p is reported (the conservative one)."""
+    import torch
+    runs, best = [], None
+    for seed in SEEDS:
+        r = train_scibert(train, dev, test, seed)
+        print(f"  seed {seed}: dev {r['dev_f1']:.3f} | test macro-F1 {r['test_f1']:.3f}", flush=True)
+        r["p"] = paired_bootstrap(test[1], r["test_pred"], baseline_pred)
+        if best is None or r["dev_f1"] > best["dev_f1"]:
+            best = r
+        runs.append(r)
+        torch.cuda.empty_cache()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    best["model"].save_pretrained(out_dir); best["tok"].save_pretrained(out_dir)
+    test_f1 = [r["test_f1"] for r in runs]
+    micro = [r["test_micro"] for r in runs]
+    return {"scibert_mean": float(np.mean(test_f1)), "scibert_std": float(np.std(test_f1)),
+            "scibert_micro_mean": float(np.mean(micro)), "scibert_micro_std": float(np.std(micro)),
+            "scibert_seeds": {str(r["seed"]): {"dev": round(r["dev_f1"], 4), "test": round(r["test_f1"], 4),
+                                               "bootstrap_p": r["p"]} for r in runs},
+            "saved_seed": best["seed"], "saved_by": "best dev macro-F1",
+            "bootstrap_p_scibert_vs_baseline_max": max(r["p"] for r in runs),
+            "per_label_saved_model": dict(zip(LABELS, f1_score(test[1], best["test_pred"], labels=LABELS,
+                                                               average=None, zero_division=0).round(3).tolist()))}
 
 
 def main() -> None:
     train, dev, test = load("train"), load("dev"), load("test")
     print(f"CSAbstruct sentences: train {len(train[0])}, dev {len(dev[0])}, test {len(test[0])}")
-    res = {}
-    res["rules"] = macro_f1(test[1], rules_predict(test[0]))
+    res = {"rules": macro_f1(test[1], rules_predict(test[0]))}
     vec = TfidfVectorizer(ngram_range=(1, 2), min_df=2, sublinear_tf=True)
     lr = LogisticRegression(max_iter=2000, C=4.0, class_weight="balanced")
     lr.fit(vec.fit_transform(train[0]), train[1])
     tfidf_pred = lr.predict(vec.transform(test[0])).tolist()
     res["tfidf"] = macro_f1(test[1], tfidf_pred)
+    res["tfidf_micro"] = micro_f1(test[1], tfidf_pred)
     print(f"rules {res['rules']:.3f} | tfidf {res['tfidf']:.3f}", flush=True)
-
-    scores, preds = [], []
-    for seed in SEEDS:
-        f1, p = train_scibert(train, dev, test, seed, None)
-        scores.append(f1); preds.append(p)
-        print(f"  seed {seed}: test macro-F1 {f1:.3f}", flush=True)
-    best = int(np.argmax(scores))
-    out = Path("models/roles_scibert")
-    out.mkdir(parents=True, exist_ok=True)
-    train_scibert(train, dev, test, SEEDS[best], out)        # retrain best seed and save it
-    res["scibert_mean"], res["scibert_std"] = float(np.mean(scores)), float(np.std(scores))
-    res["scibert_seeds"] = dict(zip(map(str, SEEDS), scores))
-    res["bootstrap_p_scibert_vs_tfidf"] = paired_bootstrap(test[1], preds[best], tfidf_pred)
-    res["per_label_scibert"] = dict(zip(LABELS, f1_score(test[1], preds[best], labels=LABELS, average=None, zero_division=0).round(3).tolist()))
+    res.update(run_seeds(train, dev, test, tfidf_pred, Path("models/roles_scibert")))
+    res["published"] = ("83.1 micro-F1, Cohan et al. 2019, a model that reads the whole abstract at once; "
+                        "ours classifies each sentence alone")
     Path("reports").mkdir(exist_ok=True)
     Path("reports/roles_results.json").write_text(json.dumps(res, indent=2), encoding="utf-8")
     print(f"rules {res['rules']:.3f} | tfidf {res['tfidf']:.3f} | scibert {res['scibert_mean']:.3f} "
-          f"+- {res['scibert_std']:.3f} | bootstrap p = {res['bootstrap_p_scibert_vs_tfidf']:.3f}")
+          f"+- {res['scibert_std']:.3f} (micro {res['scibert_micro_mean']:.3f}) | saved seed {res['saved_seed']} "
+          f"(best dev) | bootstrap p max = {res['bootstrap_p_scibert_vs_baseline_max']:.3f}")
     print("-> reports/roles_results.json, models/roles_scibert/")
 
 

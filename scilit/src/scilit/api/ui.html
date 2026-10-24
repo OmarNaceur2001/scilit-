@@ -173,19 +173,27 @@ async function doSearch(){show('search');$('search').innerHTML=wait('Recherche d
  const r=await (await fetch('/search?q='+encodeURIComponent(q()))).json();ids=r.results.map(x=>x.paper_id);
  $('search').innerHTML=`<h2>${r.results.length} articles</h2><p class="sub">BM25 + BGE-M3 → RRF → cross-encoder · ${r.latency_s} s</p>`+r.results.map(x=>
  `<div class="result"><div class="rank">${String(x.rank).padStart(2,'0')}</div><div><h3>${esc(x.title)}</h3><div class="meta"><span class="chip">${esc((x.section||'').replace('_',' '))}</span></div><div class="passage">${hl(x.text.slice(0,460))}…</div></div></div>`).join('')}
-async function doReview(){const b=$('gen');b.disabled=true;show('review');$('review').innerHTML=wait('Recherche, rédaction et vérification de chaque phrase… (1 à 2 minutes)');
+async function doReview(){const b=$('gen');b.disabled=true;show('review');$('review').innerHTML=wait('Lecture de chaque article, puis synthèse et vérification de chaque phrase… (2 à 3 minutes)');
  try{const r=await (await fetch('/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q()})})).json();
- ids=r.table.map(x=>x.paper_id);const ev=Object.fromEntries(r.evidence.map(e=>[e.id,e]));const c=r.counts;const n=r.sentences.length;
+ ids=r.table.map(x=>x.paper_id);const C=r.claims,c=r.counts,n=r.sentences.length,cc=r.claim_counts;
+ const nclaims=Object.values(cc).reduce((x,y)=>x+y,0),relevant=r.cards.filter(x=>x.relevant).length;
+ const src=(cid,key)=>{const x=C[cid];if(!x)return'';return `<div class="ev" id="${key}"><b>${esc(x.label)} et al. ${x.year}</b> · ${esc(x.title)}<br><i>${esc(x.text)}</i><br>${x.quotes.map(t=>'« '+hl(t)+' »').join('<br>')}</div>`};
+ const cite=(cid,key)=>`<span class="cite" onclick="tog('${key}')">[${cid}${C[cid]?' · '+esc(C[cid].label)+' '+C[cid].year:''}]</span>`;
+ const sent=(s,i)=>`<div class="s ${s.status==='supported'?'':'removed '+s.status}"><span class="st ${s.status}">${LABEL[s.status]}${s.repair==='repaired'?' · réparée':''}</span>${hl(s.text)}`+
+  s.cites.map(id=>cite(id,'x'+i+id)).join('')+s.cites.map(id=>src(id,'x'+i+id)).join('')+'</div>';
  const kept=r.sentences.filter(s=>s.status==='supported'),rem=r.sentences.filter(s=>s.status!=='supported');
- const sent=(s,i)=>`<div class="s ${s.status==='supported'?'':'removed '+s.status}"><span class="st ${s.status}">${LABEL[s.status]}</span>${hl(s.text)}`+
-  s.cites.map(id=>`<span class="cite" onclick="tog('e${i}${id}')">[${id}${ev[id]?' · '+esc(ev[id].first_author.split(' ').pop())+' '+ev[id].year:''}]</span>`).join('')+
-  s.cites.filter(id=>ev[id]).map(id=>`<div class="ev" id="e${i}${id}"><b>${esc(ev[id].title)}</b><br>${hl(ev[id].text)}</div>`).join('')+'</div>';
- $('review').innerHTML=`<div class="kpis"><div class="kpi hl"><b>${c.supported}/${n}</b><span>phrases soutenues</span></div>
-  <div class="kpi"><b>${n-c.supported}</b><span>retirées par la vérification</span></div><div class="kpi"><b>${c.not_found+c.misattributed}</b><span>citations inventées / mal attribuées</span></div>
-  <div class="kpi"><b>${(r.latency_s.search+r.latency_s.generation+r.latency_s.verification).toFixed(0)} s</b><span>latence totale</span></div></div>
-  <h2>Revue (phrases soutenues)</h2><p class="sub">Cliquez sur une citation pour voir le passage source.</p>${kept.map(sent).join('')||'<p class="empty">Aucune phrase soutenue.</p>'}
+ const parts=[...new Set(kept.map(s=>s.part))].sort((x,y)=>(y==='answer')-(x==='answer'));
+ const body=parts.map((p,k)=>`<h3 style="margin:16px 0 6px">${p==='answer'?'Réponse':esc(p)}</h3>`+kept.filter(s=>s.part===p).map((s,i)=>sent(s,'k'+k+'_'+i)).join('')).join('');
+ const cards=r.cards.filter(x=>x.relevant&&x.claims.some(y=>y.status==='supported')).map((x,k)=>`<div class="s"><b>${esc(x.title)}</b> <span class="meta">${esc(x.first_author)} · ${x.year}</span>`+
+  x.claims.filter(y=>y.status==='supported').map(y=>`<div style="margin-top:6px">${hl(y.text)} ${cite(y.id,'c'+k+y.id)}${src(y.id,'c'+k+y.id)}</div>`).join('')+'</div>').join('');
+ $('review').innerHTML=`<div class="kpis"><div class="kpi hl"><b>${c.supported}/${n}</b><span>phrases de synthèse soutenues</span></div>
+  <div class="kpi"><b>${relevant}/${r.cards.length}</b><span>articles lus jugés pertinents</span></div><div class="kpi"><b>${cc.supported}/${nclaims}</b><span>affirmations vérifiées dans les articles</span></div>
+  <div class="kpi"><b>${(r.latency_s.search+r.latency_s.reading+r.latency_s.synthesis).toFixed(0)} s</b><span>latence totale</span></div></div>
+  ${r.abstained?`<div class="s removed insufficient"><span class="st insufficient">corpus insuffisant</span>${esc(r.gaps)}</div>`:`<h2>Revue vérifiée</h2><p class="sub">Écrite uniquement à partir d'affirmations vérifiées dans chaque article · cliquez sur une citation pour lire les phrases sources.</p>${body||'<p class="empty">Aucune phrase soutenue.</p>'}
+  ${r.gaps?`<div class="s" style="border-left:3px solid #e3b23c"><span class="st insufficient">non couvert par les preuves</span>${esc(r.gaps)}</div>`:''}`}
+  ${cards?'<h2 style="margin-top:18px">Ce que dit chaque article</h2>'+cards:''}
   ${rem.length?'<h2 style="margin-top:18px">Retirées par la vérification</h2>'+rem.map((s,i)=>sent(s,'r'+i)).join(''):''}`;
- const cell=x=>x?esc(x.text.slice(0,180)):'<span class="na">non rapporté</span>';
+ const cell=x=>x?hl(x.text.length>200?x.text.slice(0,x.text.lastIndexOf(' ',200))+' …':x.text):'<span class="na">non rapporté</span>';
  $('table').innerHTML='<table><tr><th>Article</th><th>Question</th><th>Méthode</th><th>Données</th><th>Résultats</th><th>Limites</th></tr>'+r.table.map(x=>
   `<tr><td class="paper"><b>${esc(x.title)}</b><br><span class="meta">${esc(x.first_author)} · ${x.year}</span></td><td>${cell(x.question)}</td><td>${cell(x.method)}</td><td>${cell(x.data)}</td><td>${cell(x.results)}</td><td>${cell(x.limits)}</td></tr>`).join('')+'</table>';
  }catch(e){$('review').innerHTML='<p class="empty">Erreur : vérifiez qu\'Ollama est lancé.</p>'}b.disabled=false}

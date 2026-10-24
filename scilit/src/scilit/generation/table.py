@@ -26,8 +26,12 @@ def articles() -> dict:
 
 
 def build_table(results: list[dict]) -> list[dict]:
-    rows = []
+    """One row per paper, in ranking order (results may hold several passages of one paper)."""
+    rows, seen = [], set()
     for r in results:
+        if r["paper_id"] in seen:
+            continue
+        seen.add(r["paper_id"])
         rec, art = records().get(r["paper_id"]), articles()[r["paper_id"]]
         row = {"paper_id": r["paper_id"], "title": art["title"], "year": art.get("arxiv_year") or art["year"],
                "first_author": (art["authors"] or ["?"])[0]}

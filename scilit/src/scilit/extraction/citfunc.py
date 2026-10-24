@@ -4,7 +4,7 @@ Part 8: citation function = WHY a paper cites another (background / method / res
 
 Data: SciCite (Cohan et al., 2019), ~11k human-labelled citation sentences, official splits.
 Systems: TF-IDF + logistic regression (classical) vs SciBERT fine-tuned (3 seeds, mean +- std),
-paired bootstrap. This is our REPRODUCED PUBLISHED RESULT (subject rule 2.3.6): Beltagy et al.
+paired bootstrap for every seed; saved model chosen on dev. This is our REPRODUCED PUBLISHED RESULT (subject rule 2.3.6): Beltagy et al.
 (2019, SciBERT paper) and Cohan et al. (2019) report about 84-85 macro-F1 on SciCite; we put our
 score next to theirs and explain the gap.
 
@@ -48,20 +48,12 @@ def main() -> None:
     tfidf_pred = lr.predict(vec.transform(test[0])).tolist()
     res = {"tfidf": f1(test[1], tfidf_pred)}
     print(f"tfidf {res['tfidf']:.3f}", flush=True)
-    scores, preds = [], []
-    for seed in roles.SEEDS:
-        s, p = roles.train_scibert(train, dev, test, seed, None)
-        scores.append(s); preds.append(p); print(f"  seed {seed}: test macro-F1 {s:.3f}", flush=True)
-    best = int(np.argmax(scores))
-    out = Path("models/citfunc_scibert"); out.mkdir(parents=True, exist_ok=True)
-    roles.train_scibert(train, dev, test, roles.SEEDS[best], out)
-    res.update(scibert_mean=float(np.mean(scores)), scibert_std=float(np.std(scores)),
-               scibert_seeds=dict(zip(map(str, roles.SEEDS), scores)),
-               bootstrap_p_scibert_vs_tfidf=roles.paired_bootstrap(test[1], preds[best], tfidf_pred),
-               published="about 0.84-0.85 macro-F1 (Cohan et al. 2019; Beltagy et al. 2019)")
+    res.update(roles.run_seeds(train, dev, test, tfidf_pred, Path("models/citfunc_scibert")))
+    res["published"] = "SciBERT 85.49 macro-F1 (Beltagy et al. 2019); previous best 84.0 (Cohan et al. 2019)"
     Path("reports/citfunc_results.json").write_text(json.dumps(res, indent=2), encoding="utf-8")
     print(f"tfidf {res['tfidf']:.3f} | scibert {res['scibert_mean']:.3f} +- {res['scibert_std']:.3f} | "
-          f"bootstrap p = {res['bootstrap_p_scibert_vs_tfidf']:.3f} | published ~0.84-0.85")
+          f"saved seed {res['saved_seed']} (best dev) | bootstrap p max = "
+          f"{res['bootstrap_p_scibert_vs_baseline_max']:.3f} | published 0.8549")
 
 
 if __name__ == "__main__":

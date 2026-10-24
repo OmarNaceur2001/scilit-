@@ -2,11 +2,32 @@
   "tfidf": 0.7991719631771245,
   "scibert_mean": 0.855068966988092,
   "scibert_std": 0.016563067577590965,
+  "scibert_micro_mean": 0.8665949435180204,
+  "scibert_micro_std": 0.01451397263392369,
   "scibert_seeds": {
-    "13": 0.8538994258892485,
-    "42": 0.875913968078733,
-    "2024": 0.8353935069962944
+    "13": {
+      "dev": 0.8156,
+      "test": 0.8539,
+      "bootstrap_p": 0.0
+    },
+    "42": {
+      "dev": 0.8323,
+      "test": 0.8759,
+      "bootstrap_p": 0.0
+    },
+    "2024": {
+      "dev": 0.8283,
+      "test": 0.8354,
+      "bootstrap_p": 0.0
+    }
   },
-  "bootstrap_p_scibert_vs_tfidf": 0.0,
-  "published": "about 0.84-0.85 macro-F1 (Cohan et al. 2019; Beltagy et al. 2019)"
+  "saved_seed": 42,
+  "saved_by": "best dev macro-F1",
+  "bootstrap_p_scibert_vs_baseline_max": 0.0,
+  "per_label_saved_model": {
+    "method": 0.879,
+    "background": 0.897,
+    "result": 0.851
+  },
+  "published": "SciBERT 85.49 macro-F1 (Beltagy et al. 2019); previous best 84.0 (Cohan et al. 2019)"
 }

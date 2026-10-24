@@ -4,7 +4,7 @@ Part 13: FastAPI app over the pipeline (the same code that produced the evaluati
 
   GET  /              web page (style of the original SciLit UI)
   GET  /search?q=     hybrid search -> papers + best passage
-  POST /review        {query, generator: llm|template} -> table + verified sentences + counts
+  POST /review        {query, generator: llm|template, repair} -> answer + verification + table
   GET  /bibtex?ids=   BibTeX for paper IDs (comma-separated)
   GET  /docs          automatic API documentation
 
@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from scilit.corpus.arxiv_meta import surname
 from scilit.generation import review as R
-from scilit.generation.table import articles, build_table
+from scilit.generation.table import articles
 from scilit.retrieval.search import Searcher
 
 app = FastAPI(title="SciLit", description="Verified literature-review assistant")
@@ -32,7 +32,7 @@ searcher = Searcher()
 class ReviewRequest(BaseModel):
     query: str
     generator: str = "llm"
-    k: int = 8
+    repair: bool = True
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -49,17 +49,8 @@ def search(q: str, k: int = 10):
 
 @app.post("/review")
 def review(req: ReviewRequest):
-    t = {"start": time.time()}
-    results = searcher.search(req.query, k=req.k); t["search"] = time.time()
-    pack = R.evidence_pack(results)
-    draft = R.generate_llm(req.query, pack, "qwen2.5:7b", "English") if req.generator == "llm" else R.generate_template(pack)
-    t["generation"] = time.time()
-    checked = R.verify(draft, pack); t["verification"] = time.time()
-    counts = {s: sum(c["status"] == s for c in checked) for s in
-              ["supported", "insufficient", "contradicted", "number_mismatch", "misattributed", "not_found"]}
-    lat = {k: round(t[k] - t[p], 2) for p, k in zip(["start", "search", "generation"], ["search", "generation", "verification"])}
-    return {"query": req.query, "table": build_table(results), "evidence": pack, "sentences": checked,
-            "counts": counts, "latency_s": lat}
+    """Same function as the command line: evidence passages -> answer -> verification -> repair."""
+    return R.run_review(req.query, searcher, req.generator, do_repair=req.repair)
 
 
 @app.get("/bibtex", response_class=PlainTextResponse)

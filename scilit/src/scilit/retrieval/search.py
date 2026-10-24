@@ -9,7 +9,8 @@ Part 6: query -> ranked papers with their best passage.
   3. rerank     : cross-encoder bge-reranker-v2-m3 reads query and passage TOGETHER (full attention
                   between them): more precise than comparing two separate vectors, but one forward
                   pass per pair, so only on the 50 fused candidates
-  4. papers     : best chunk per paper (one long paper cannot fill the whole top 10)
+  4. cut        : at most `per_paper` chunks per paper (1 = a ranking of papers, used by the
+                  evaluation and the table; 2 = evidence passages, used by the review)
   5. context    : each kept chunk is returned with its previous and next chunks (small-to-big)
 
 Methods (for the ablation): bm25 | dense | hybrid | hybrid_rerank (default)
@@ -41,6 +42,14 @@ class Searcher:
     @cached_property
     def chunks(self) -> dict:
         return {c["id"]: c for c in map(json.loads, self.chunks_path.open(encoding="utf-8"))}
+
+    @cached_property
+    def chunks_by_paper(self) -> dict:
+        """paper id -> its chunk ids (the reader ranks the passages of ONE paper)."""
+        by: dict = {}
+        for cid, c in self.chunks.items():
+            by.setdefault(c["paper_id"], []).append(cid)
+        return by
 
     @cached_property
     def titles(self) -> dict:
@@ -94,7 +103,11 @@ class Searcher:
         scores = self.reranker.predict(pairs, batch_size=16)
         return [c for _, c in sorted(zip(scores, ids), key=lambda x: -x[0])]
 
-    def search(self, query: str, k: int = 10, method: str = "hybrid_rerank") -> list[dict]:
+    def search(self, query: str, k: int = 10, method: str = "hybrid_rerank", per_paper: int = 1) -> list[dict]:
+        """One ranking of passages, cut into k results with at most `per_paper` passages per paper.
+        per_paper=1 -> a ranking of PAPERS (evaluation, comparison table);
+        per_paper=2 -> a ranking of EVIDENCE PASSAGES (the review: a paper can bring both its
+        method and its result paragraph)."""
         if method == "bm25":
             ranked = self.bm25_top(query)
         elif method == "dense":
@@ -103,12 +116,12 @@ class Searcher:
             ranked = self.rrf(self.bm25_top(query), self.dense_top(query))
             if method == "hybrid_rerank":
                 ranked = self.rerank(query, ranked[:50]) + ranked[50:]
-        results, seen = [], set()
-        for cid in ranked:                               # best chunk per paper
+        results, taken = [], {}
+        for cid in ranked:
             c = self.chunks[cid]
-            if c["paper_id"] in seen:
+            if taken.get(c["paper_id"], 0) >= per_paper:   # one long paper cannot fill the list
                 continue
-            seen.add(c["paper_id"])
+            taken[c["paper_id"]] = taken.get(c["paper_id"], 0) + 1
             ctx = [self.chunks[x]["text"] for x in (c["prev"], cid, c["next"]) if x]
             results.append({"rank": len(results) + 1, "paper_id": c["paper_id"],
                             "title": self.titles.get(c["paper_id"], ""), "chunk_id": cid,
