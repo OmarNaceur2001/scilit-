@@ -103,7 +103,7 @@ def train_scibert(train, dev, test, seed: int, out_dir: Path | None):
     def predict(x):
         model.eval(); preds = []
         with torch.no_grad(), torch.autocast(dev_, enabled=dev_ == "cuda"):
-            for enc, _ in batches(x, ["other"] * len(x), 64, False):
+            for enc, _ in batches(x, [LABELS[0]] * len(x), 64, False):
                 preds += model(**enc).logits.argmax(-1).tolist()
         return [LABELS[p] for p in preds]
 
