@@ -71,7 +71,7 @@ def build_dense(chunks: list[dict], out: Path, model_name: str, batch: int) -> N
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", default="structure", choices=["structure", "fixed"])
+    ap.add_argument("--mode", default="structure", choices=["structure", "fixed", "fixed_title"])
     ap.add_argument("--dir", default="data/index")
     ap.add_argument("--bm25", action="store_true")
     ap.add_argument("--dense", metavar="MODEL")

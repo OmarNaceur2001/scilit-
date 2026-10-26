@@ -10,11 +10,14 @@ structure (default) : a chunk = one paragraph inside one section, never cutting 
                       (traceability) and links to the previous / next chunk (small-to-big).
 fixed (ablation)    : 1000-character windows with 200 overlap, ignoring structure - the
                       baseline the structure-aware chunking is measured against.
+fixed_title         : the same windows, with the paper title as header. structure vs fixed changes
+                      TWO things (boundaries and header); fixed_title isolates each effect:
+                      fixed -> fixed_title = the header, fixed_title -> structure = the boundaries.
 
 Input : data/parsed/documents.jsonl (structured papers only)
 Output: data/index/chunks_<mode>.jsonl
 
-Usage: python -m scilit.corpus.chunk            (or --mode fixed)
+Usage: python -m scilit.corpus.chunk            (or --mode fixed / fixed_title)
 """
 from __future__ import annotations
 
@@ -59,12 +62,12 @@ def structure_chunks(doc: dict) -> list[dict]:
     return chunks
 
 
-def fixed_chunks(doc: dict) -> list[dict]:
+def fixed_chunks(doc: dict, title: bool = False) -> list[dict]:
     text = " ".join(s["text"] for sec in doc["sections"] if sec["type"] not in SKIP
                     for s in sec["sentences"])
     out, start = [], 0
     while start < len(text):
-        out.append({"paper_id": doc["id"], "section": None, "section_type": None, "header": "",
+        out.append({"paper_id": doc["id"], "section": None, "section_type": None, "header": doc["title"] if title else "",
                     "text": text[start:start + FIXED_CHARS], "sentence_ids": []})
         start += FIXED_CHARS - FIXED_OVERLAP
     return out
@@ -74,7 +77,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--parsed", default="data/parsed/documents.jsonl")
     ap.add_argument("--out", default="data/index")
-    ap.add_argument("--mode", choices=["structure", "fixed"], default="structure")
+    ap.add_argument("--mode", choices=["structure", "fixed", "fixed_title"], default="structure")
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -85,7 +88,7 @@ def main() -> None:
             if not doc["structured"]:
                 continue
             n_docs += 1
-            chunks = structure_chunks(doc) if args.mode == "structure" else fixed_chunks(doc)
+            chunks = structure_chunks(doc) if args.mode == "structure" else fixed_chunks(doc, args.mode == "fixed_title")
             for i, c in enumerate(chunks):
                 c["id"] = f"{doc['id']}#c{i}"
                 c["prev"] = f"{doc['id']}#c{i - 1}" if i else None

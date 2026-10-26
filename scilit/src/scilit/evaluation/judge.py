@@ -9,12 +9,19 @@ pool  : for each query, the top-10 papers of every search method (bm25, dense, h
 label : shows query + title + abstract, the annotator types 0 (not relevant), 1 (partly),
         2 (relevant). Saved after every answer; quit and resume any time.
 
+extend: the ablation runs (French queries, fixed-size chunks) were not in the pool, so papers only
+        they found were never judged and counted as not relevant: a bias against them. `extend`
+        collects their top-10, keeps only the (query, paper) pairs never judged, and exports them
+        with the SAME instructions; `import-extra` stores the answers in labels/qrels_chatgpt_extra.tsv.
+
 Files: labels/queries.tsv (input), labels/pool.jsonl, labels/qrels.tsv (the human judgments)
 
 Usage: python -m scilit.evaluation.judge pool
        python -m scilit.evaluation.judge export     # batches for an external LLM judge (ChatGPT)
        python -m scilit.evaluation.judge import     # its answers -> labels/qrels_chatgpt.tsv
        python -m scilit.evaluation.judge label 50   # human judgments on 50 random items (validation)
+       python -m scilit.evaluation.judge extend       # unjudged pairs of the ablation runs -> ChatGPT
+       python -m scilit.evaluation.judge import-extra
 """
 from __future__ import annotations
 
@@ -26,6 +33,11 @@ import textwrap
 from pathlib import Path
 
 METHODS = ["bm25", "dense", "hybrid", "hybrid_rerank"]
+# ablation runs: (name, index, method, query field); judged with `extend`
+ABLATIONS = [("hybrid_rerank (FR)", "structure", "hybrid_rerank", "query_fr"),
+             ("bm25, fixed-size chunks", "fixed", "bm25", "query_en"),
+             ("bm25, fixed-size chunks + title", "fixed_title", "bm25", "query_en")]
+EXTRA = Path("labels/qrels_chatgpt_extra.tsv")
 DEPTH = 10
 POOL, QRELS = Path("labels/pool.jsonl"), Path("labels/qrels.tsv")
 
@@ -118,9 +130,50 @@ def label(sample: int | None = None) -> None:
     print("All judged.")
 
 
+def extend() -> None:
+    from scilit.retrieval.search import Searcher
+    judged = {(r[0], r[1]) for f in (Path("labels/qrels_chatgpt.tsv"), EXTRA) if f.exists()
+              for r in csv.reader(f.open(encoding="utf-8"), delimiter="\t")}
+    arts = {a["id"]: a for a in map(json.loads, Path("data/raw/articles.jsonl").open(encoding="utf-8"))}
+    searchers, items = {}, {}
+    for name, mode, method, field in ABLATIONS:
+        if not Path(f"data/index/{mode}/bm25.pkl").exists():
+            print(f"skip {name}: no index data/index/{mode}/ (run chunk + build_index --mode {mode})")
+            continue
+        searchers.setdefault(mode, Searcher(mode=mode))
+        for q in queries():
+            for r in searchers[mode].search(q[field], k=DEPTH, method=method):
+                if (q["qid"], r["paper_id"]) not in judged:
+                    items[(q["qid"], r["paper_id"])] = {"qid": q["qid"], "query": q["query_en"], "paper_id": r["paper_id"],
+                                                        "title": arts[r["paper_id"]]["title"], "abstract": arts[r["paper_id"]]["abstract"]}
+        print(f"{name}: {len(items)} unjudged pairs so far", flush=True)
+    items = list(items.values())
+    random.Random(0).shuffle(items)
+    out = Path("labels/chatgpt"); out.mkdir(parents=True, exist_ok=True)
+    lines = [INSTRUCTIONS.format(n=len(items)), "ITEMS:"]
+    for i, it in enumerate(items, 1):           # always the ENGLISH query: same task as the main pool
+        lines.append(f"\n{i}. QUERY: {it['query']}\nTITLE: {it['title']}\nABSTRACT: {it['abstract'][:300]}")
+    (out / "extra_items.txt").write_text("\n".join(lines), encoding="utf-8")
+    (out / "extra_map.json").write_text(json.dumps([[it["qid"], it["paper_id"]] for it in items]), encoding="utf-8")
+    print(f"{len(items)} new pairs -> {out / 'extra_items.txt'}. Paste into ChatGPT, put its digits in "
+          f"{out / 'extra_answers.txt'}, then run: import-extra")
+
+
+def import_extra() -> None:
+    import re
+    d = Path("labels/chatgpt")
+    mapping = json.loads((d / "extra_map.json").read_text(encoding="utf-8"))
+    digits = re.findall(r"[012]", (d / "extra_answers.txt").read_text(encoding="utf-8"))
+    if len(digits) != len(mapping):
+        raise SystemExit(f"Got {len(digits)} digits, expected {len(mapping)}.")
+    with EXTRA.open("w", newline="", encoding="utf-8") as f:
+        csv.writer(f, delimiter="\t").writerows([qid, pid, g] for (qid, pid), g in zip(mapping, digits))
+    print(f"{len(digits)} judgments -> {EXTRA}")
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1]
     if cmd == "label":
         label(int(sys.argv[2]) if len(sys.argv) > 2 else None)
     else:
-        {"pool": pool, "export": export, "import": import_answers}[cmd]()
+        {"pool": pool, "export": export, "import": import_answers, "extend": extend, "import-extra": import_extra}[cmd]()

@@ -4,7 +4,7 @@ Part 13: FastAPI app over the pipeline (the same code that produced the evaluati
 
   GET  /              web page (style of the original SciLit UI)
   GET  /search?q=     hybrid search -> papers + best passage
-  POST /review        {query, generator: llm|template, repair} -> answer + verification + table
+  POST /review        {query, generator: llm|template} -> answer + verification + table
   GET  /bibtex?ids=   BibTeX for paper IDs (comma-separated)
   GET  /docs          automatic API documentation
 
@@ -32,7 +32,6 @@ searcher = Searcher()
 class ReviewRequest(BaseModel):
     query: str
     generator: str = "llm"
-    repair: bool = True
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -49,8 +48,8 @@ def search(q: str, k: int = 10):
 
 @app.post("/review")
 def review(req: ReviewRequest):
-    """Same function as the command line: evidence passages -> answer -> verification -> repair."""
-    return R.run_review(req.query, searcher, req.generator, do_repair=req.repair)
+    """Same function as the command line: evidence passages -> plan -> sentences -> verification."""
+    return R.run_review(req.query, searcher, req.generator)
 
 
 @app.get("/bibtex", response_class=PlainTextResponse)
@@ -80,7 +79,8 @@ def stats():
     read = lambda f: json.loads((rep / f).read_text(encoding="utf-8")) if (rep / f).exists() else None
     retrieval = []
     if (rep / "retrieval_eval.md").exists():
-        for line in (rep / "retrieval_eval.md").read_text(encoding="utf-8").splitlines():
+        text = (rep / "retrieval_eval.md").read_text(encoding="utf-8").split("## Condensed")[0]   # standard table
+        for line in text.splitlines():
             cells = [c.strip() for c in line.strip("|").split("|")]
             if len(cells) == 4 and re.match(r"\d", cells[1]):
                 retrieval.append({"system": cells[0], "recall10": cells[1], "mrr": cells[2], "ndcg10": cells[3]})

@@ -4,32 +4,30 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scilit"
-version = "0.2.0"
+version = "0.3.0"
+description = "Verified literature-review assistant for NLP (course project P6)"
 requires-python = ">=3.10"
+# Only what the code imports. torch: install the CUDA build first (see README), then `pip install -e .`
 dependencies = [
-    "pydantic>=2.6",
-    "requests>=2.31",
-    "pymupdf>=1.24",
-    "rank-bm25>=0.2",
-    "spacy>=3.7",
-    "sentence-transformers>=2.7",
-    "transformers>=4.40",
-    "torch>=2.2",
-    "scikit-learn>=1.3",
-    "numpy",
+    "requests>=2.31",            # OpenAlex, arXiv, Ollama
+    "pyyaml>=6.0",               # configs/themes.yaml
+    "rapidfuzz>=3.0",            # fuzzy title matching
+    "pymupdf>=1.24",             # PDF reading and layout
+    "fasttext-wheel>=0.9.2",     # language identification (lid.176)
+    "pysbd>=0.3.4",              # sentence splitting
+    "numpy>=1.26",
+    "pandas>=2.0",               # SciCite parquet files
+    "pyarrow>=14",
+    "scikit-learn>=1.3",         # TF-IDF baselines, F1
+    "rank-bm25>=0.2.2",
     "faiss-cpu>=1.8",
+    "torch>=2.2",
+    "transformers>=4.40",        # SciBERT, DeBERTa NLI
+    "sentence-transformers>=2.7",# BGE-M3, bge-reranker-v2-m3
+    "huggingface-hub>=0.23",     # scripts/download_models.py
     "fastapi>=0.111",
-    "uvicorn[standard]>=0.29",
-    "tqdm>=4.66",
-    "python-dotenv>=1.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=8",
-    "pytest-cov>=5",
-    "ruff>=0.4",
-    "mypy>=1.9",
+    "pydantic>=2.6",
+    "uvicorn>=0.29",
 ]
 
 [tool.setuptools]
@@ -39,11 +37,4 @@ package-dir = {"" = "scilit/src"}
 where = ["scilit/src"]
 
 [tool.ruff]
-line-length = 88
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
-ignore = ["E501"]
-
-[tool.pytest.ini_options]
-testpaths = ["scilit/tests", "tests"]
+line-length = 120

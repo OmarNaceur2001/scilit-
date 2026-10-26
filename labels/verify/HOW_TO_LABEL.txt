@@ -1,0 +1,8 @@
+How to label (each person alone, without looking at the other sheet or discussing):
+For every item, read the SOURCES, then the SENTENCE, and write in the "label" column:
+  S  supported      every fact of the sentence (numbers, conditions, methods, what it applies to)
+                    is stated or directly implied by the sources
+  P  partly         the main point is there, but something is added, changed or generalised
+  N  not supported  the sources do not say it
+  C  contradicted   the sources say the opposite
+Optional: a short note. Save as CSV (keep the file name).

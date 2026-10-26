@@ -10,20 +10,32 @@ The premise is always ORIGINAL text from the papers, never text written by the L
 Checks, first failure wins:
   1 existence    every cited ID exists                                     -> not_found
   2 attribution  every author named in the sentence is an author of a cited paper -> misattributed
-  3 numbers      every number in the sentence appears in the source sentences   -> number_mismatch
-  4 NLI          DeBERTa-v3-base MNLI+FEVER+ANLI: premise = source sentences, hypothesis = sentence
-                 P(entailment) >= 0.5 -> supported ; P(contradiction) >= 0.5 -> contradicted ;
-                 otherwise -> insufficient
+  3 numbers      every claim-carrying number of the sentence (decimals, %, multipliers such as 3x,
+                 integers > 10) appears in the source sentences             -> number_mismatch
+                 (a number present but attached to another condition, "4.5% for tables" vs
+                 "4.5% overall", is a question of meaning: step 4's job, measured in Part 11)
+  4 support      the sources entail the sentence, judged by one of two verifiers (VERIFIER):
+                   "deberta"   DeBERTa-v3-base MNLI+FEVER+ANLI (184 M), a sentence-pair NLI classifier:
+                               P(entailment) >= 0.5 -> supported ; P(contradiction) >= 0.5 ->
+                               contradicted ; otherwise -> insufficient. Window 512 tokens.
+                   "minicheck" Bespoke-MiniCheck-7B (Ollama, 4-bit), trained to decide whether a
+                               sentence is supported by a grounding document (Tang et al., 2024,
+                               LLM-AggreFact): "Yes" -> supported, "No" -> insufficient. 32K window.
+                 Both are kept so they can be compared on the same human-checked pairs
+                 (evaluation/review_eval.py); choose with SCILIT_VERIFIER or --verifier.
 """
 from __future__ import annotations
 
+import os
 import re
 import unicodedata
 from functools import lru_cache
 
 from scilit.corpus.arxiv_meta import surname
 
+VERIFIER = os.environ.get("SCILIT_VERIFIER", "deberta")        # "deberta" | "minicheck"
 NLI_MODEL = "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli"
+MINICHECK = "bespoke-minicheck"
 ENTAIL, CONTRA = 0.5, 0.5
 PREMISE_TOKENS = 400            # the NLI window is 512 tokens: room left for the hypothesis
 STATUSES = ["supported", "insufficient", "contradicted", "number_mismatch", "misattributed", "not_found"]
@@ -79,12 +91,17 @@ def strip_attribution(text: str) -> str:
     return t[:1].upper() + t[1:] if t else text
 
 
-def numbers(text: str) -> set[str]:
-    """Numbers that carry a claim: decimals, percentages, integers > 10; not years or model sizes."""
+NUMBER = re.compile(r"(?<![\w.\-])(\d+(?:\.\d+)?)\s?(%|×|x(?![a-z])|times\b|-?fold\b)?(?![\w])")
+
+
+def numbers(text: str, every: bool = False) -> set[str]:
+    """Numbers that carry a claim: decimals, percentages, multipliers ("3x", "3×", "3 times",
+    "3-fold") and integers > 10; not years or plain small counts ("two layers", "3 seeds").
+    every=True returns all of them: used on the SOURCES, where a claim's number only has to appear."""
     out = set()
-    for m in re.finditer(r"(?<![\w.\-])(\d+(?:\.\d+)?)(%?)(?![\w])", text):
-        v = m.group(1)
-        if re.fullmatch(r"(19|20)\d\d", v) or ("." not in v and not m.group(2) and int(v) <= 10):
+    for m in NUMBER.finditer(text):
+        v, unit = m.group(1), m.group(2)
+        if not every and (re.fullmatch(r"(19|20)\d\d", v) or ("." not in v and not unit and int(v) <= 10)):
             continue
         out.add(v.rstrip("0").rstrip(".") if "." in v else v)
     return out
@@ -102,19 +119,35 @@ def names_in(text: str, known: set[str]) -> set[str]:
     return {n for n in etal | (caps & known) if n}
 
 
-def check(text: str, sources: list[str] | None, cited_authors: set[str], known_authors: set[str]) -> tuple[str, dict]:
-    """sources=None means a cited ID does not exist."""
+def minicheck(sources: list[str], hypothesis: str) -> bool:
+    from scilit.generation.llm import ollama_text
+    answer = ollama_text(f"Document: {' '.join(sources)}\nClaim: {hypothesis}", MINICHECK)
+    return answer.strip().lower().startswith("yes")
+
+
+def judge(sources: list[str], hypothesis: str, verifier: str | None = None) -> tuple[str, dict]:
+    """Do the sources support the sentence? -> (supported | contradicted | insufficient, scores)."""
+    verifier = verifier or VERIFIER
+    if verifier == "minicheck":
+        ok = minicheck(sources, hypothesis)
+        return ("supported" if ok else "insufficient"), {"verifier": "minicheck", "supported": ok}
+    ent, con = nli_scores(sources, hypothesis)
+    status = "supported" if ent >= ENTAIL else "contradicted" if con >= CONTRA else "insufficient"
+    return status, {"verifier": "deberta", "entailment": round(ent, 3), "contradiction": round(con, 3)}
+
+
+def check(text: str, sources: list[str] | None, cited_authors: set[str], known_authors: set[str],
+          verifier: str | None = None) -> tuple[str, dict]:
+    """The 4 checks. sources=None means a cited ID does not exist."""
     if not sources:
         return "not_found", {}
     unknown = names_in(text, known_authors) - cited_authors
     if unknown:
         return "misattributed", {"names_not_cited": sorted(unknown)}
-    missing = numbers(text) - set().union(*(numbers(s) for s in sources))
+    missing = numbers(text) - set().union(*(numbers(s, every=True) for s in sources))
     if missing:
         return "number_mismatch", {"numbers_missing": sorted(missing)}
-    ent, con = nli_scores(sources, strip_attribution(text))
-    status = "supported" if ent >= ENTAIL else "contradicted" if con >= CONTRA else "insufficient"
-    return status, {"entailment": round(ent, 3), "contradiction": round(con, 3)}
+    return judge(sources, strip_attribution(text), verifier)
 
 
 def count(items: list[dict]) -> dict:

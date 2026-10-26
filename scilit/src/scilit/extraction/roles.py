@@ -3,7 +3,9 @@ SciLit - extraction/roles.py
 Part 7 step 1: sentence-role classifier (background / objective / method / result / other).
 
 Gold data: CSAbstruct (Cohan et al., 2019) - computer-science abstracts, every sentence labelled
-by humans. Public, so no AI-made labels (subject rule 2.1). Official train / dev / test split.
+by humans. Public, so no AI-made labels (subject rule 2.1). Official train / dev / test split,
+DEDUPLICATED (dedupe below): the official splits share sentences (172 of the 1,349 test sentences,
+12.7%, also appear in train), which would measure memory instead of generalisation.
 
 Three systems, same test set, macro-F1 (rare roles count as much as frequent ones), plus micro-F1
 to compare with the published 83.1 (which is micro-F1, with the whole abstract as context):
@@ -57,6 +59,27 @@ def load(split: str) -> tuple[list[str], list[str]]:
             sents += ex["sentences"]
             labels += [l.lower() for l in ex["labels"]]
     return sents, labels
+
+
+def norm(s: str) -> str:
+    return " ".join(s.lower().split())
+
+
+def dedupe(train, dev, test) -> tuple[tuple, tuple, dict]:
+    """Remove from dev every sentence seen in train, and from test every sentence seen in train or
+    dev: every reported score is then on text the model has never seen. Train is unchanged."""
+    seen = {norm(x) for x in train[0]}
+
+    def keep(split):
+        idx = [i for i, x in enumerate(split[0]) if norm(x) not in seen]
+        return [split[0][i] for i in idx], [split[1][i] for i in idx]
+    dev2 = keep(dev)
+    seen |= {norm(x) for x in dev[0]}
+    test2 = keep(test)
+    info = {"split": "official, deduplicated", "dev_removed": len(dev[0]) - len(dev2[0]),
+            "test_removed": len(test[0]) - len(test2[0]), "dev": len(dev2[0]), "test": len(test2[0])}
+    print(f"dedupe: removed {info['dev_removed']} dev and {info['test_removed']} test sentences already seen", flush=True)
+    return dev2, test2, info
 
 
 def rules_predict(sents: list[str]) -> list[str]:
@@ -163,8 +186,9 @@ def run_seeds(train, dev, test, baseline_pred: list[str], out_dir: Path) -> dict
 
 def main() -> None:
     train, dev, test = load("train"), load("dev"), load("test")
-    print(f"CSAbstruct sentences: train {len(train[0])}, dev {len(dev[0])}, test {len(test[0])}")
-    res = {"rules": macro_f1(test[1], rules_predict(test[0]))}
+    print(f"CSAbstruct sentences (official): train {len(train[0])}, dev {len(dev[0])}, test {len(test[0])}")
+    dev, test, info = dedupe(train, dev, test)
+    res = {"data": info, "rules": macro_f1(test[1], rules_predict(test[0]))}
     vec = TfidfVectorizer(ngram_range=(1, 2), min_df=2, sublinear_tf=True)
     lr = LogisticRegression(max_iter=2000, C=4.0, class_weight="balanced")
     lr.fit(vec.fit_transform(train[0]), train[1])

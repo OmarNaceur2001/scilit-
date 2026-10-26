@@ -1,37 +1,44 @@
 {
-  "rules": 0.34401657740047115,
-  "tfidf": 0.7241092688907314,
-  "tfidf_micro": 0.7071905114899926,
-  "scibert_mean": 0.759606922865304,
-  "scibert_std": 0.004889064766853755,
-  "scibert_micro_mean": 0.755868544600939,
-  "scibert_micro_std": 0.0036483377959558617,
+  "data": {
+    "split": "official, deduplicated",
+    "dev_removed": 23,
+    "test_removed": 214,
+    "dev": 2003,
+    "test": 1135
+  },
+  "rules": 0.3569573912077961,
+  "tfidf": 0.6913832663095094,
+  "tfidf_micro": 0.6740088105726872,
+  "scibert_mean": 0.748627058578676,
+  "scibert_std": 0.004903374211362108,
+  "scibert_micro_mean": 0.7462555066079295,
+  "scibert_micro_std": 0.00719380247513416,
   "scibert_seeds": {
     "13": {
-      "dev": 0.6297,
-      "test": 0.7642,
+      "dev": 0.6139,
+      "test": 0.7485,
       "bootstrap_p": 0.0
     },
     "42": {
-      "dev": 0.6063,
-      "test": 0.7618,
-      "bootstrap_p": 0.004
+      "dev": 0.5912,
+      "test": 0.7427,
+      "bootstrap_p": 0.001
     },
     "2024": {
-      "dev": 0.6029,
-      "test": 0.7528,
-      "bootstrap_p": 0.019
+      "dev": 0.5911,
+      "test": 0.7547,
+      "bootstrap_p": 0.0
     }
   },
   "saved_seed": 13,
   "saved_by": "best dev macro-F1",
-  "bootstrap_p_scibert_vs_baseline_max": 0.019,
+  "bootstrap_p_scibert_vs_baseline_max": 0.001,
   "per_label_saved_model": {
-    "background": 0.82,
-    "objective": 0.636,
-    "method": 0.735,
-    "result": 0.735,
-    "other": 0.895
+    "background": 0.8,
+    "objective": 0.642,
+    "method": 0.722,
+    "result": 0.734,
+    "other": 0.845
   },
   "published": "83.1 micro-F1, Cohan et al. 2019, a model that reads the whole abstract at once; ours classifies each sentence alone"
 }

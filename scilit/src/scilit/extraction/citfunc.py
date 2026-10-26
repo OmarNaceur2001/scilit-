@@ -2,7 +2,8 @@
 SciLit - extraction/citfunc.py
 Part 8: citation function = WHY a paper cites another (background / method / result comparison).
 
-Data: SciCite (Cohan et al., 2019), ~11k human-labelled citation sentences, official splits.
+Data: SciCite (Cohan et al., 2019), ~11k human-labelled citation sentences, official splits,
+deduplicated like Part 7 (roles.dedupe: no dev or test sentence also seen in an earlier split).
 Systems: TF-IDF + logistic regression (classical) vs SciBERT fine-tuned (3 seeds, mean +- std),
 paired bootstrap for every seed; saved model chosen on dev. This is our REPRODUCED PUBLISHED RESULT (subject rule 2.3.6): Beltagy et al.
 (2019, SciBERT paper) and Cohan et al. (2019) report about 84-85 macro-F1 on SciCite; we put our
@@ -41,12 +42,13 @@ def load(split: str) -> tuple[list[str], list[str]]:
 def main() -> None:
     train, dev, test = load("train"), load("validation"), load("test")
     print(f"SciCite: train {len(train[0])}, dev {len(dev[0])}, test {len(test[0])}", flush=True)
+    dev, test, info = roles.dedupe(train, dev, test)
     roles.LABELS[:] = NAMES                         # reuse the Part 7 trainer with these labels
     f1 = lambda g, p: f1_score(g, p, labels=NAMES, average="macro")
     vec = TfidfVectorizer(ngram_range=(1, 2), min_df=2, sublinear_tf=True)
     lr = LogisticRegression(max_iter=2000, C=4.0, class_weight="balanced").fit(vec.fit_transform(train[0]), train[1])
     tfidf_pred = lr.predict(vec.transform(test[0])).tolist()
-    res = {"tfidf": f1(test[1], tfidf_pred)}
+    res = {"data": info, "tfidf": f1(test[1], tfidf_pred)}
     print(f"tfidf {res['tfidf']:.3f}", flush=True)
     res.update(roles.run_seeds(train, dev, test, tfidf_pred, Path("models/citfunc_scibert")))
     res["published"] = "SciBERT 85.49 macro-F1 (Beltagy et al. 2019); previous best 84.0 (Cohan et al. 2019)"

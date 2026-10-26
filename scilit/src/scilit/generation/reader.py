@@ -16,13 +16,17 @@ the question, then synthesise. The reader never sees fragments of several papers
   2 the part relevant to the question   the abstract + the paper's 3 passages that the cross-encoder
         (bge-reranker-v2-m3) scores highest for the question; at most 30 sentences, in reading order;
         each sentence keeps its previous sentence as context ("this model" -> which model)
-  3 the reading card   Qwen2.5-7B, temperature 0, JSON schema:
-        relevant  does this paper say something that helps answer the question?
-        claims    up to 4 short claims about what THIS paper does or finds, each pointing to the
-                  1-3 sentence IDs that state it (the IDs are an enum in the schema: an ID that does
-                  not exist cannot be generated)
-  4 verification   each claim against its own source sentences + context (verify.check); only supported
-        claims are passed on to the synthesis
+  3 the reading card   Qwen2.5-7B, temperature 0, JSON schema (draft_card):
+        relation  "relevant" / "partly relevant" / "not relevant": the SAME three levels and the SAME
+                  definitions as the relevance labels of the evaluation (grades 2 / 1 / 0, judge.py),
+                  so the reader and the evaluation agree by design and their gap is measurable
+                  (a yes/no question makes a small model say "yes" too easily; the middle level helps)
+        claims    only if the paper is relevant: up to 4 short claims about what
+                  THIS paper does or finds, how it works first, each pointing to the 1-3 sentence IDs
+                  that state it (an enum in the schema: an ID that does not exist cannot be generated)
+  4 verification   each claim against its own source sentences + context (verify_card); only
+        supported claims are passed on to the synthesis
+  Drafting (LLM) and verification (NLI) are separate so that the 8 papers can be drafted in parallel.
 
 Why not the whole paper: one paper is ~10,000 tokens, the model's window is 8,192, and models use
 the middle of long inputs poorly (Liu et al., 2023, "Lost in the Middle", one of our seed papers).
@@ -44,11 +48,14 @@ OWN_SECTIONS = {"abstract", "introduction", "method", "experiments", "results", 
 TOP_PASSAGES, MAX_SENTENCES, MAX_ABSTRACT = 3, 30, 10
 CITATION = re.compile(r"\bet al\b|\([^()]*\b(19|20)\d\d[a-z]?\)|\[\d+(?:\s*[,–\-]\s*\d+)*\]")
 
+RELATIONS = ["relevant", "partly relevant", "not relevant"]          # = grades 2 / 1 / 0
+
+
 def card_schema(ids: list[str]) -> dict:
     """The JSON schema of a reading card. Sources are an ENUM of this paper's sentence IDs:
     constrained decoding makes an invented or malformed ID impossible."""
-    return {"type": "object", "required": ["relevant", "claims"], "properties": {
-        "relevant": {"type": "boolean"},
+    return {"type": "object", "required": ["relation", "claims"], "properties": {
+        "relation": {"type": "string", "enum": RELATIONS},
         "claims": {"type": "array", "maxItems": 4, "items": {"type": "object", "required": ["text", "sources"], "properties": {
             "text": {"type": "string"},
             "sources": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "string", "enum": ids}}}}}}}
@@ -59,13 +66,16 @@ CARD_PROMPT = """Research question: "{q}"
 You are reading ONE paper: "{title}" ({year}).
 Below are sentences from this paper, each with its ID.
 
-Decide:
-- "relevant": true only if this paper directly studies the topic of the research question and these
-  sentences help answer it; false if it is about another topic, even a neighbouring one.
-- "claims": if relevant, up to 4 claims that answer the question from THIS paper: what the paper
-  does, how it works, or what it finds. Each claim is ONE short sentence (at most 35 words), starts
-  with "The authors" or "This paper", copies numbers exactly, and lists in "sources" the IDs of the
-  1 to 3 sentences that state it. Use only these sentences. If not relevant, return no claims.
+1. "relation": would this paper belong in a literature review answering the research question?
+   - "relevant": the paper is directly about the question (it studies, proposes or measures what
+     the question asks about), even if it does not answer every part of it
+   - "partly relevant": related to the question, but not central (same area, different focus)
+   - "not relevant"
+2. "claims": ONLY if the paper is relevant, up to 4 claims that answer the question from THIS
+   paper. Put first HOW or WHY things work (mechanisms, methods), then what the paper finds.
+   Each claim is ONE short sentence (at most 35 words), starts with "The authors" or "This paper",
+   copies numbers exactly, and lists in "sources" the IDs of the 1 to 3 sentences that state it.
+   Use only these sentences. Otherwise return no claims.
 
 Sentences:
 {sentences}"""
@@ -138,28 +148,32 @@ def evidence(query: str, doc: dict, searcher) -> list[tuple[str, str, str]]:
 
 # ------------------------------------------------------------------ the reading card
 
-def read_paper(query: str, meta: dict, sents: list[tuple[str, str, str]], generator: str, model: str = MODEL) -> dict:
-    """-> card {relevant, claims: [{text, sources, status, checks}], sentences: {id: text}, context: {id: text}}
-    Each claim is verified against its source sentences, each preceded by its context sentence."""
+def draft_card(query: str, meta: dict, sents: list[tuple[str, str, str]], generator: str, model: str = MODEL) -> dict:
+    """The reader's draft (LLM, or the template baseline). No verification here."""
     if not sents:
-        return {**meta, "relevant": False, "claims": [], "sentences": {}, "context": {}, "n_evidence": 0}
-    text, ctx = {sid: t for sid, t, _ in sents}, {sid: c for sid, _, c in sents}
+        return {"relation": RELATIONS[2], "claims": []}
     if generator == "template":                      # baseline: the sentence closest to the question, quoted
         q = V.words(query)
         sid, best, _ = max(sents, key=lambda x: len(V.words(x[1]) & q))
-        out = {"relevant": bool(V.words(best) & q), "claims": [{"text": best, "sources": [sid]}]}
-    else:
-        out = ollama(CARD_PROMPT.format(q=query, title=meta["title"], year=meta["year"],
-                                        sentences="\n".join(f"[{sid}] {t}" for sid, t, _ in sents)),
-                     card_schema(list(text)), model)
+        return {"relation": RELATIONS[0] if V.words(best) & q else RELATIONS[2], "claims": [{"text": best, "sources": [sid]}]}
+    return ollama(CARD_PROMPT.format(q=query, title=meta["title"], year=meta["year"],
+                                     sentences="\n".join(f"[{sid}] {t}" for sid, t, _ in sents)),
+                  card_schema([sid for sid, _, _ in sents]), model)
+
+
+def verify_card(meta: dict, sents: list[tuple[str, str, str]], draft: dict) -> dict:
+    """-> card {relation, relevant, claims: [{text, sources, status, checks}], sentences, context}.
+    Each claim is checked against its source sentences, each preceded by its context sentence."""
+    text, ctx = {sid: t for sid, t, _ in sents}, {sid: c for sid, _, c in sents}
+    relevant = draft.get("relation") == RELATIONS[0]
     me = {surname(meta["first_author"])}
     claims = []
-    for c in out.get("claims", []) if out.get("relevant") else []:
+    for c in draft.get("claims", []) if relevant else []:
         sources = [s for s in dict.fromkeys(c.get("sources", [])) if s in text]
         premise = [f"{ctx[s]} {text[s]}".strip() for s in sources]
         status, checks = V.check(c["text"], premise or None, me, me)
         claims.append({"text": c["text"].strip(), "sources": sources, "status": status, "checks": checks})
     used = {s for c in claims for s in c["sources"]}
-    return {**meta, "relevant": bool(out.get("relevant")), "claims": claims,
+    return {**meta, "relation": draft.get("relation", RELATIONS[2]), "relevant": relevant, "claims": claims,
             "sentences": {s: text[s] for s in used}, "context": {s: ctx[s] for s in used if ctx[s]},
             "n_evidence": len(sents)}

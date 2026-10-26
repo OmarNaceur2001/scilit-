@@ -1,0 +1,13 @@
+theme	query_en	query_fr
+tokenization	Does the choice of tokenizer affect the downstream performance of language models?	Le choix du tokeniseur influence-t-il les performances des modèles de langue sur les tâches finales ?
+syntax_semantics	Semantic role labeling with neural networks	Étiquetage des rôles sémantiques avec des réseaux de neurones
+word_embeddings	Do word embeddings encode social biases such as gender stereotypes?	Les plongements de mots encodent-ils des biais sociaux comme les stéréotypes de genre ?
+embeddings	How are sentence embeddings evaluated on semantic textual similarity?	Comment évalue-t-on les plongements de phrases sur la similarité textuelle sémantique ?
+attention	Why do transformers need positional encodings, and which kinds work best?	Pourquoi les transformers ont-ils besoin d'encodages de position, et lesquels fonctionnent le mieux ?
+pretrained_lm	Knowledge distillation to compress pretrained language models	La distillation de connaissances pour compresser les modèles de langue pré-entraînés
+peft	Prefix tuning and prompt tuning compared with full fine-tuning	Le prefix tuning et le prompt tuning comparés au fine-tuning complet
+prompting	How sensitive are large language models to the wording of prompts?	Les grands modèles de langue sont-ils sensibles à la formulation des prompts ?
+rag	How should retrieved passages be selected or reranked for retrieval-augmented generation?	Comment sélectionner ou reclasser les passages récupérés pour la génération augmentée par la recherche ?
+hallucination	Why do large language models hallucinate?	Pourquoi les grands modèles de langue hallucinent-ils ?
+multilingual_arabic	Named entity recognition for Arabic text	La reconnaissance d'entités nommées pour les textes en arabe
+evaluation_robustness	Shortcut learning and spurious correlations in natural language inference datasets	L'apprentissage de raccourcis et les corrélations fallacieuses dans les jeux de données d'inférence textuelle

@@ -179,7 +179,7 @@ async function doReview(){const b=$('gen');b.disabled=true;show('review');$('rev
  const nclaims=Object.values(cc).reduce((x,y)=>x+y,0),relevant=r.cards.filter(x=>x.relevant).length;
  const src=(cid,key)=>{const x=C[cid];if(!x)return'';return `<div class="ev" id="${key}"><b>${esc(x.label)} et al. ${x.year}</b> · ${esc(x.title)}<br><i>${esc(x.text)}</i><br>${x.quotes.map(t=>'« '+hl(t)+' »').join('<br>')}</div>`};
  const cite=(cid,key)=>`<span class="cite" onclick="tog('${key}')">[${cid}${C[cid]?' · '+esc(C[cid].label)+' '+C[cid].year:''}]</span>`;
- const sent=(s,i)=>`<div class="s ${s.status==='supported'?'':'removed '+s.status}"><span class="st ${s.status}">${LABEL[s.status]}${s.repair==='repaired'?' · réparée':''}</span>${hl(s.text)}`+
+ const sent=(s,i)=>`<div class="s ${s.status==='supported'?'':'removed '+s.status}"><span class="st ${s.status}">${LABEL[s.status]}</span>${hl(s.text)}`+
   s.cites.map(id=>cite(id,'x'+i+id)).join('')+s.cites.map(id=>src(id,'x'+i+id)).join('')+'</div>';
  const kept=r.sentences.filter(s=>s.status==='supported'),rem=r.sentences.filter(s=>s.status!=='supported');
  const parts=[...new Set(kept.map(s=>s.part))].sort((x,y)=>(y==='answer')-(x==='answer'));
@@ -189,7 +189,7 @@ async function doReview(){const b=$('gen');b.disabled=true;show('review');$('rev
  $('review').innerHTML=`<div class="kpis"><div class="kpi hl"><b>${c.supported}/${n}</b><span>phrases de synthèse soutenues</span></div>
   <div class="kpi"><b>${relevant}/${r.cards.length}</b><span>articles lus jugés pertinents</span></div><div class="kpi"><b>${cc.supported}/${nclaims}</b><span>affirmations vérifiées dans les articles</span></div>
   <div class="kpi"><b>${(r.latency_s.search+r.latency_s.reading+r.latency_s.synthesis).toFixed(0)} s</b><span>latence totale</span></div></div>
-  ${r.abstained?`<div class="s removed insufficient"><span class="st insufficient">corpus insuffisant</span>${esc(r.gaps)}</div>`:`<h2>Revue vérifiée</h2><p class="sub">Écrite uniquement à partir d'affirmations vérifiées dans chaque article · cliquez sur une citation pour lire les phrases sources.</p>${body||'<p class="empty">Aucune phrase soutenue.</p>'}
+  ${r.abstained?`<div class="s removed insufficient"><span class="st insufficient">corpus insuffisant</span>${esc(r.gaps)}</div>`:`${r.thin_evidence?'<div class="s" style="border-left:3px solid #e3b23c"><span class="st insufficient">preuves minces</span>un seul article du corpus traite cette question</div>':''}<h2>Revue vérifiée</h2><p class="sub">Écrite uniquement à partir d'affirmations vérifiées dans chaque article · cliquez sur une citation pour lire les phrases sources.</p>${body||'<p class="empty">Aucune phrase soutenue.</p>'}
   ${r.gaps?`<div class="s" style="border-left:3px solid #e3b23c"><span class="st insufficient">non couvert par les preuves</span>${esc(r.gaps)}</div>`:''}`}
   ${cards?'<h2 style="margin-top:18px">Ce que dit chaque article</h2>'+cards:''}
   ${rem.length?'<h2 style="margin-top:18px">Retirées par la vérification</h2>'+rem.map((s,i)=>sent(s,'r'+i)).join(''):''}`;
