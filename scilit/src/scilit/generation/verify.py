@@ -21,8 +21,10 @@ Checks, first failure wins:
                    "minicheck" Bespoke-MiniCheck-7B (Ollama, 4-bit), trained to decide whether a
                                sentence is supported by a grounding document (Tang et al., 2024,
                                LLM-AggreFact): "Yes" -> supported, "No" -> insufficient. 32K window.
-                 Both are kept so they can be compared on the same human-checked pairs
-                 (evaluation/review_eval.py); choose with SCILIT_VERIFIER or --verifier.
+                 Default: MiniCheck. On the verifier test set (real pairs + hard cases, Part 11) it
+                 accepts 8% of unsupported sentences against 33% for DeBERTa, rejects 16% of
+                 supported ones against 44%, balanced accuracy 0.88 vs 0.62. DeBERTa stays available
+                 for comparison; choose with SCILIT_VERIFIER or --verifier.
 """
 from __future__ import annotations
 
@@ -33,7 +35,7 @@ from functools import lru_cache
 
 from scilit.corpus.arxiv_meta import surname
 
-VERIFIER = os.environ.get("SCILIT_VERIFIER", "deberta")        # "deberta" | "minicheck"
+VERIFIER = os.environ.get("SCILIT_VERIFIER", "minicheck")      # "minicheck" (default) | "deberta"
 NLI_MODEL = "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli"
 MINICHECK = "bespoke-minicheck"
 ENTAIL, CONTRA = 0.5, 0.5

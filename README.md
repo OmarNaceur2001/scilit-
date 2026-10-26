@@ -18,7 +18,7 @@ question
    │                  → Qwen2.5-7B writes a reading card: is the paper relevant, and up to 4 claims,
    │                    each pointing to its source sentences
    ├─ 3. Verify       every claim is checked against its source sentences
-   │                  (numbers, attribution, NLI with DeBERTa-v3)
+   │                  (numbers, attribution, Bespoke-MiniCheck-7B fact checker)
    ├─ 4. Plan         Qwen groups the verified claims into points (claim IDs only, no text yet)
    ├─ 5. Write        one sentence per point, written from that point's claims only
    └─ 6. Verify       every sentence is checked against the original source sentences;
@@ -40,13 +40,15 @@ The corpus pipeline: OpenAlex + arXiv metadata, deduplication, a PDF quality gat
 | Retrieval, nDCG@10 | 30 test questions | hybrid + rerank **0.827**, BM25 0.823 (difference not significant, p = 0.42) |
 | Sentence roles, macro-F1 | CSAbstruct, deduplicated splits | SciBERT **0.749 ± 0.005**, TF-IDF 0.691, rules 0.357 (p ≤ 0.001) |
 | Citation function, macro-F1 | SciCite | SciBERT **0.855 ± 0.017**, published 0.855 (reproduced) |
-| Review sentences supported | 30 test + 12 held-out questions | **95% / 93%**, vs 53% / 67% for single-call generation on the same reading cards (p < 0.001) |
+| Review sentences supported | 30 test + 12 held-out questions | **95% / 93%**, vs 53% / 67% for single-call generation on the same reading cards (p < 0.001, DeBERTa verifier) |
+| Verifier accuracy | 113 sentence–source pairs, ChatGPT-labelled | MiniCheck: balanced accuracy **0.88**, 93% of accepted sentences supported; DeBERTa-v3 NLI: 0.62, 69% |
+| Review with MiniCheck | 30 test + 12 held-out questions | **92% / 92%** of sentences accepted, 82–84% of verified claims used |
 
 How these numbers were measured:
 
 - Classifiers: 3 seeds, model chosen on dev, reported on test. Sentences that appear in both train and test in the official CSAbstruct splits (12.7% of test) were removed.
 - Review: both designs are run on identical saved reading cards, so the difference comes from the synthesis step only. The held-out questions were written after the design was fixed and never inspected before the final run.
-- "Supported" is the verifier's judgement. Measuring the verifier's own error rate on a human-labelled set (real pairs + hard cases: swapped numbers, removed qualifiers, reversed findings…) is in progress.
+- "Supported" is the verifier's judgement. The verifiers themselves were tested on real pairs plus hard cases (changed or swapped numbers, reversed findings, swapped entities, plausible but unstated facts); MiniCheck replaced DeBERTa as the default after this test.
 - Retrieval relevance labels were produced by an LLM and are declared as such.
 
 ## Quick start
@@ -56,6 +58,7 @@ Requirements: Python 3.10+, [Ollama](https://ollama.com), a GPU with 8 GB is eno
 ```bash
 pip install -e .
 ollama pull qwen2.5:7b
+ollama pull bespoke-minicheck
 ```
 
 Build the corpus and indexes (one time):
@@ -97,7 +100,7 @@ python -m scilit.evaluation.review_eval replay --source test --tag test_single -
 python -m scilit.evaluation.review_eval compare --tags test test_single
 python -m scilit.evaluation.review_eval report
 python -m scilit.evaluation.review_eval verify-set --source test    # verifier test set for human labelling
-python -m scilit.evaluation.review_eval verify-score --which deberta
+python -m scilit.evaluation.review_eval verify-score --which deberta minicheck
 ```
 
 The slow step (search + reading) runs once; every comparison replays the saved reading cards, so two configurations differ in exactly one thing.
@@ -121,6 +124,6 @@ reports/        evaluation results
 
 - The corpus has 1,109 papers: a question outside it gets a thin answer or none. SciLit says so instead of inventing.
 - The reader sees about 30 sentences per paper; findings only in tables or appendices can be missed.
-- The verifier can accept a sentence that links a correct number to the wrong condition. Its error rate is being measured.
+- The verifier is not perfect: on the test set MiniCheck still accepts about 8% of unsupported sentences.
 - The LLM runs at temperature 0, but GPU inference is not bitwise reproducible: averages are stable, individual reviews can vary slightly.
 - English only for now: questions in French retrieve English papers, but reviews are written in English.

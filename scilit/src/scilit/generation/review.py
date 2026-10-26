@@ -9,11 +9,13 @@ Parts 10-11: answer a research question the way a literature review is written.
   3 abstain     if NO retrieved paper has a supported claim, the corpus does not cover the
                 question: SciLit says so and lists the closest papers, instead of writing.
                 With a single source it still answers, flagged "thin evidence"
-  4 plan        Qwen2.5-7B only DECIDES which verified claims go together (JSON schema, claim IDs
-                as an enum, temperature 0): a list of points, each = 1-3 claim IDs + its section
-                ("answer" for the 1-2 points that answer the question directly, else a short aspect
-                title). Choosing from a list is a selection task a 7B model does reliably; the
-                citations of every sentence are fixed HERE, before any text exists
+  4 plan        Qwen2.5-7B ASSIGNS every verified claim (JSON schema with one required entry per
+                claim ID, temperature 0): "answer", a short section title, or "off-topic". No claim
+                can be skipped silently (measured on the previous design, which let the model pick
+                groups: it used 88% of the claims of the first paper listed and 38% of the last
+                ones, for papers equally relevant). Code then groups the claims of each section
+                into points of up to 3: the citations of every sentence are fixed HERE, before any
+                text exists
   5 write       one call per point: the model sees ONLY that point's claims (not even the question)
                 and restates them in ONE sentence. It cannot cite the wrong claim (it sees no other)
                 and cannot add the question's model, task or setting to it (it does not see them).
@@ -24,7 +26,8 @@ Parts 10-11: answer a research question the way a literature review is written.
 
 Not generated on purpose: "X finds A, while Y finds B" contrasts. No verifier can check the contrast
 itself, so findings on the same aspect are placed side by side under one section title instead.
-"gaps" is the model's statement of what the claims do not address: an absence, shown as such.
+"gaps" is an evidence-coverage note computed by code (papers that contributed claims, papers only
+partly relevant, relevant papers with no verified claim, claims judged off-topic): facts, not model text.
 There is no repair step: with citations fixed before writing, a rejected sentence has nothing true
 left to rescue (measured: 4 of 74 repairs accepted in the previous design).
 
@@ -61,30 +64,25 @@ from scilit.generation.table import articles, build_table, to_markdown
 K_PAPERS, MAX_WORDS, READ_WORKERS = 8, 40, 4
 
 def plan_schema(claim_ids: list[str]) -> dict:
-    """Plan = which claims make one point together. "claims" is an ENUM of the existing claim IDs."""
-    point = {"type": "object", "required": ["section", "claims"], "properties": {"section": {"type": "string"},
-             "claims": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "string", "enum": claim_ids}}}}
-    return {"type": "object", "required": ["points", "gaps"], "properties": {
-        "points": {"type": "array", "minItems": 1, "maxItems": 8, "items": point}, "gaps": {"type": "string"}}}
+    """One REQUIRED entry per claim ID: the model must decide about every claim."""
+    return {"type": "object", "required": claim_ids, "properties": {c: {"type": "string"} for c in claim_ids}}
 
 
 PLAN_PROMPT = """Research question: "{q}"
 
-Below are verified claims from {n} papers, each with an ID. Plan the answer of a literature review:
-decide which claims go together. Do not write the review.
-
-"points": each point lists the IDs of 1 to 3 claims that together make ONE point (the same finding,
-or parts of one method or result), and the "section" it belongs to:
-- the first 1 or 2 points have section "answer": the claims that most directly answer the question;
-- every other point has a short section title (2 to 5 words) naming one aspect of the question;
-  points about the same aspect share the same title.
-Use each claim at most once. Leave out claims that do not help answer the question. Make only as
-many points as the claims support.
-
-"gaps": one sentence on what the question asks that none of these claims address, or "" if nothing.
+Below are verified claims from {n} papers, each with an ID. For EVERY claim, decide where it goes in
+a literature review that answers the question:
+- "answer" if it directly answers the question;
+- otherwise a short section title of 2 to 4 plain words (for example "Training stability") naming the
+  aspect of the question it addresses; claims about the same aspect get exactly the same title;
+- "off-topic" if it does not help answer the question.
+Return one entry per claim ID.
 
 Claims:
 {claims}"""
+OFF_TOPIC = {"off-topic", "off topic", "offtopic", "none", "irrelevant", "not relevant", "n/a", ""}
+POINT_SIZE, ANSWER_POINTS = 3, 2
+
 
 WRITE_SCHEMA = {"type": "object", "required": ["text"], "properties": {"text": {"type": "string"}}}
 WRITE_PROMPT = """Restate the claims below in ONE sentence of at most 35 words, combining them if there
@@ -169,26 +167,62 @@ def claim_blocks(claims: dict, cards: list[dict]) -> list[str]:
     return blocks
 
 
-def plan(query: str, claims: dict, cards: list[dict], model: str) -> tuple[list[dict], str]:
-    """Step 4: group claim IDs into points. Code enforces what the schema cannot: each claim used once,
-    at most 2 "answer" points, and the first point answers the question."""
+def title(section: str) -> str:
+    """'performance_improvement' -> 'Performance improvement' (acronyms kept)."""
+    t = re.sub(r"\s+", " ", re.sub(r"[_\-]+", " ", section)).strip(" .:")
+    return t[:1].upper() + t[1:] if t else "Findings"
+
+
+def plan(query: str, claims: dict, cards: list[dict], model: str) -> tuple[list[dict], list[str]]:
+    """Step 4 -> (points, off-topic claim IDs). The model labels every claim; code groups them: one
+    section per title (case-insensitive), in the order the titles first appear, the answer first;
+    each section split into points of up to POINT_SIZE claims; the answer keeps at most
+    ANSWER_POINTS points, its other claims go to "Main findings"."""
     blocks = claim_blocks(claims, cards)
     out = ollama(PLAN_PROMPT.format(q=query, n=len(blocks), claims="\n\n".join(blocks)), plan_schema(list(claims)), model)
-    points, used, answers = [], set(), 0
-    for p in out.get("points", []):
-        ids = [c for c in dict.fromkeys(p.get("claims", [])) if c in claims and c not in used]
-        if not ids:
+    sections: dict[str, dict] = {}
+    off = []
+    for cid in claims:
+        raw = str(out.get(cid, "")).strip()
+        key = raw.casefold().strip(" .:\"'")
+        if key in OFF_TOPIC:
+            off.append(cid)
             continue
-        used |= set(ids)
-        section = (p.get("section") or "").strip() or "Findings"
-        if section.lower() == "answer":
-            answers += 1
-            section = "answer" if answers <= 2 else "Findings"
-        points.append({"part": section, "cites": ids})
-    if points and not answers:
-        points[0]["part"] = "answer"
-    points.sort(key=lambda p: p["part"] != "answer")          # stable: the answer first, sections in model order
-    return points, out.get("gaps", "").strip()
+        name = "answer" if key == "answer" else title(raw)
+        sections.setdefault("answer" if key == "answer" else name.casefold(), {"name": name, "ids": []})["ids"].append(cid)
+    if sections and "answer" not in sections:          # no claim labelled "answer": the first section answers
+        first = next(iter(sections))
+        sections = {"answer": {"name": "answer", "ids": sections.pop(first)["ids"]}, **sections}
+    if "answer" in sections:
+        ids = sections["answer"]["ids"]
+        keep = POINT_SIZE * ANSWER_POINTS
+        if len(ids) > keep:
+            sections["answer"]["ids"] = ids[:keep]
+            sections.setdefault("main findings", {"name": "Main findings", "ids": []})["ids"][:0] = ids[keep:]
+    points = []
+    for key, sec in sorted(sections.items(), key=lambda kv: kv[0] != "answer"):
+        points += [{"part": sec["name"], "cites": sec["ids"][i:i + POINT_SIZE]} for i in range(0, len(sec["ids"]), POINT_SIZE)]
+    return points, off
+
+
+def coverage(cards: list[dict], claims: dict, off_topic: list[str]) -> tuple[str, dict]:
+    """What the evidence behind the review does and does not cover, counted by code."""
+    with_claims = {c["paper_id"] for c in claims.values()}
+    cov = {"papers": len(cards), "papers_with_claims": len(with_claims),
+           "partly_relevant": [c["title"] for c in cards if c["relation"] == "partly relevant"],
+           "not_relevant": [c["title"] for c in cards if c["relation"] == "not relevant"],
+           "relevant_no_verified_claim": [c["title"] for c in cards if c["relevant"] and c["paper_id"] not in with_claims],
+           "claims_off_topic": off_topic}
+    parts = [f"{len(with_claims)} of {len(cards)} retrieved papers contributed verified claims"]
+    if cov["partly_relevant"]:
+        parts.append(f"{len(cov['partly_relevant'])} judged only partly relevant (not used)")
+    if cov["not_relevant"]:
+        parts.append(f"{len(cov['not_relevant'])} not relevant")
+    if cov["relevant_no_verified_claim"]:
+        parts.append(f"{len(cov['relevant_no_verified_claim'])} relevant but with no claim that passed verification")
+    if off_topic:
+        parts.append(f"{len(off_topic)} verified claims judged off-topic for this question")
+    return "Evidence coverage: " + "; ".join(parts) + ".", cov
 
 
 def write(query: str, point: dict, claims: dict, model: str) -> dict:
@@ -198,11 +232,11 @@ def write(query: str, point: dict, claims: dict, model: str) -> dict:
     return {**clean(out.get("text", ""), point["cites"]), "part": point["part"]}
 
 
-def synthesise(query: str, claims: dict, cards: list[dict], model: str) -> tuple[list[dict], str, list[dict]]:
-    points, gaps = plan(query, claims, cards, model)
+def synthesise(query: str, claims: dict, cards: list[dict], model: str) -> tuple[list[dict], list[dict], list[str]]:
+    points, off = plan(query, claims, cards, model)
     with ThreadPoolExecutor(READ_WORKERS) as pool:
         sents = list(pool.map(lambda p: write(query, p, claims, model), points))
-    return [s for s in sents if s["text"]], gaps, points
+    return [s for s in sents if s["text"]], points, off
 
 
 def synthesise_single(query: str, claims: dict, cards: list[dict], model: str) -> tuple[list[dict], str]:
@@ -266,17 +300,20 @@ def write_review(query: str, table: list[dict], cards: list[dict], synthesis: st
               "claims": claims, "claim_counts": V.count([c for card in cards for c in card["claims"]]),
               "table": table, "abstained": not covered, "thin_evidence": len(covered) == 1}
     points: list[dict] = []
+    off: list[str] = []
     if result["abstained"]:
-        draft, gaps = [], (f"The corpus does not cover this question: {len(covered)} of {len(cards)} retrieved "
-                           f"papers contain a verified claim about it.")
+        draft = []
     elif synthesis == "plan":
-        draft, gaps, points = synthesise(query, claims, cards, model)
+        draft, points, off = synthesise(query, claims, cards, model)
     elif synthesis == "single":
-        draft, gaps = synthesise_single(query, claims, cards, model)
+        draft, _ = synthesise_single(query, claims, cards, model)       # its model-written gaps are not kept
     else:
-        draft, gaps = template_synthesis(claims)
+        draft, _ = template_synthesis(claims)
+    gaps, cov = coverage(cards, claims, off)
+    if result["abstained"]:
+        gaps = f"The corpus does not cover this question. {gaps}"
     sentences = [check_sentence(s, claims, known) for s in draft]
-    result.update(plan=points, sentences=sentences, gaps=gaps, counts=V.count(sentences),
+    result.update(plan=points, off_topic=off, coverage=cov, sentences=sentences, gaps=gaps, counts=V.count(sentences),
                   latency_s={"synthesis": round(time.time() - t, 1)})
     return result
 
@@ -301,7 +338,7 @@ def to_md(r: dict) -> str:
         md += [f"**{'Answer' if part == 'answer' else part}.** " +
                " ".join(f"{s['text']} [{', '.join(s['cites'])}]" for s in kept if s["part"] == part), ""]
     if r["gaps"] and not r["abstained"]:
-        md += [f"*Not covered by the evidence:* {r['gaps']}", ""]
+        md += [f"*{r['gaps']}*", ""]
     md += ["## Removed by verification", ""] + [f"- **{s['status']}**: {s['text']} [{', '.join(s['cites'])}]"
                                                   for s in r["sentences"] if s["status"] != "supported"]
     md += ["", f"Claims (reading cards): {r['claim_counts']}", f"Synthesis: {r['counts']}", "", "## Reading cards", ""]

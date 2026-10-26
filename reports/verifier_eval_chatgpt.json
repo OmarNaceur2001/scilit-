@@ -1,0 +1,68 @@
+{
+ "labels": "ChatGPT (LLM labels)",
+ "labellers": [
+  "chatgpt"
+ ],
+ "gold_items": 113,
+ "deberta_calibrated_threshold": 0.2,
+ "deberta@0.2": {
+  "n": 56,
+  "supported_gold": 32,
+  "false_acceptance": 0.375,
+  "false_rejection": 0.375,
+  "balanced_accuracy": 0.625,
+  "precision_supported": 0.69,
+  "false_accepted": 9,
+  "false_rejected": 12
+ },
+ "deberta@0.5": {
+  "n": 56,
+  "supported_gold": 32,
+  "false_acceptance": 0.333,
+  "false_rejection": 0.438,
+  "balanced_accuracy": 0.615,
+  "precision_supported": 0.692,
+  "false_accepted": 8,
+  "false_rejected": 14
+ },
+ "minicheck@0.5": {
+  "n": 56,
+  "supported_gold": 32,
+  "false_acceptance": 0.083,
+  "false_rejection": 0.156,
+  "balanced_accuracy": 0.88,
+  "precision_supported": 0.931,
+  "false_accepted": 2,
+  "false_rejected": 5
+ },
+ "hard_accepted": {
+  "entity": {
+   "deberta": "1/6",
+   "minicheck": "0/6"
+  },
+  "extra": {
+   "deberta": "1/1",
+   "minicheck": "1/1"
+  },
+  "number_changed": {
+   "deberta": "0/6",
+   "minicheck": "0/6"
+  },
+  "number_swapped": {
+   "deberta": "1/3",
+   "minicheck": "0/3"
+  },
+  "qualifier": {
+   "deberta": "1/1",
+   "minicheck": "0/1"
+  },
+  "reversed": {
+   "deberta": "1/9",
+   "minicheck": "1/9"
+  },
+  "topic": {
+   "deberta": "2/10",
+   "minicheck": "0/10"
+  }
+ }
+}

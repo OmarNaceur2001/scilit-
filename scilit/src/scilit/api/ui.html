@@ -8,7 +8,7 @@
 --peach:#fbe2d6;--ochre:#9a6a12;--ochre-soft:#fbf0d9;--red:#b42318;--red-soft:#fde8e6;--line:#e3ebe6;--sans:"Outfit",-apple-system,"Segoe UI",sans-serif;--serif:"DM Serif Display",Georgia,serif}
 *{box-sizing:border-box;margin:0;padding:0}html{scroll-behavior:smooth}
 body{font:15px/1.6 var(--sans);color:var(--ink);background:#fbfdfb}
-.wrap{max-width:1160px;margin:auto;padding:0 24px}
+.wrap{max-width:1400px;margin:auto;padding:0 40px}
 .topbar{position:sticky;top:0;z-index:10;background:#fbfdfbe6;backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
 .topbar .wrap{display:flex;align-items:center;gap:26px;height:72px}
 .logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)}.logo b{font-size:1.25rem}.logo b i{font-style:normal;color:var(--green)}
@@ -21,8 +21,8 @@ body{font:15px/1.6 var(--sans);color:var(--ink);background:#fbfdfb}
 .hero{padding:56px 0 30px}.hero .wrap{display:grid;grid-template-columns:1.05fr .95fr;gap:30px;align-items:center}
 .hi{color:var(--green);font-weight:600}
 h1{font:700 3.1rem/1.08 var(--sans);letter-spacing:-.025em;margin:10px 0 16px}h1 em{font-style:normal;color:var(--green);background:linear-gradient(transparent 62%,var(--mint2) 62%)}
-.lead{color:var(--ink2);font-size:1.05rem;max-width:520px;margin-bottom:24px}
-.ask{display:flex;gap:10px;background:#fff;border:2px solid var(--ink);border-radius:16px;padding:6px;box-shadow:6px 6px 0 var(--mint2);max-width:560px}
+.lead{color:var(--ink2);font-size:1.05rem;max-width:600px;margin-bottom:24px}
+.ask{display:flex;gap:10px;background:#fff;border:2px solid var(--ink);border-radius:16px;padding:6px;box-shadow:6px 6px 0 var(--mint2);max-width:640px}
 .ask input{flex:1;border:0;padding:10px 12px;font:500 1rem var(--sans);color:var(--ink);background:transparent;min-width:0}.ask input:focus{outline:none}
 .actions{display:flex;gap:12px;margin-top:16px;flex-wrap:wrap}
 .langs{margin-top:20px;font-size:.85rem;color:var(--ink2);display:flex;gap:8px;align-items:center}.langs span{background:#fff;border:1px solid var(--line);border-radius:8px;padding:2px 9px;font-weight:600;color:var(--ink)}
@@ -79,7 +79,8 @@ footer{background:var(--ink);color:#c9d2e3;padding:46px 0 26px;margin-top:40px}
 footer .wrap{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:26px}footer h4{color:#fff;margin-bottom:10px;font-size:.95rem}
 footer a,footer p{color:#c9d2e3;font-size:.86rem;text-decoration:none;display:block;line-height:1.9}footer .logo{color:#fff}footer .logo small{color:#9fb0cc}
 .copy{text-align:center;font-size:.78rem;color:#8193b3;margin-top:28px}
-@media(max-width:900px){.hero .wrap,.about{grid-template-columns:1fr}.cards,.examples,.stats{grid-template-columns:1fr 1fr}.links{display:none}footer .wrap{grid-template-columns:1fr 1fr}.steps{grid-template-columns:1fr}h1{font-size:2.3rem}}
+@media(min-width:1500px){body{font-size:16px}h1{font-size:3.6rem}h2{font-size:2.3rem}}
+@media(max-width:900px){.wrap{padding:0 20px}.hero .wrap,.about{grid-template-columns:1fr}.cards,.examples,.stats{grid-template-columns:1fr 1fr}.links{display:none}footer .wrap{grid-template-columns:1fr 1fr}.steps{grid-template-columns:1fr}h1{font-size:2.3rem}}
 </style></head><body>
 <header class="topbar"><div class="wrap"><a class="logo" href="#top"><svg viewBox="0 0 48 48" width="40" height="40" aria-hidden="true"><rect width="48" height="48" rx="14" fill="#cfe9d9"/><rect x="11" y="9" width="20" height="26" rx="3" fill="#fff" stroke="#14294b" stroke-width="2.2"/><path d="M15 16h12M15 21h12M15 26h7" stroke="#14294b" stroke-width="2" stroke-linecap="round"/><circle cx="31" cy="30" r="8" fill="#fff" stroke="#2f7d5b" stroke-width="2.6"/><path d="m27.6 30 2.3 2.3 4-4.4" fill="none" stroke="#2f7d5b" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="m36.8 35.8 4.2 4.2" stroke="#2f7d5b" stroke-width="3" stroke-linecap="round"/></svg><div><b>Sci<i>Lit</i></b><small>États de l'art vérifiés</small></div></a>
 <nav class="links"><a href="#top">Accueil</a><a href="#how">Fonctionnement</a><a href="#tool">Outil</a><a href="#examples">Exemples</a><a href="#tool" onclick="show('eval')">Évaluation</a></nav>
@@ -190,7 +191,7 @@ async function doReview(){const b=$('gen');b.disabled=true;show('review');$('rev
   <div class="kpi"><b>${relevant}/${r.cards.length}</b><span>articles lus jugés pertinents</span></div><div class="kpi"><b>${cc.supported}/${nclaims}</b><span>affirmations vérifiées dans les articles</span></div>
   <div class="kpi"><b>${(r.latency_s.search+r.latency_s.reading+r.latency_s.synthesis).toFixed(0)} s</b><span>latence totale</span></div></div>
   ${r.abstained?`<div class="s removed insufficient"><span class="st insufficient">corpus insuffisant</span>${esc(r.gaps)}</div>`:`${r.thin_evidence?'<div class="s" style="border-left:3px solid #e3b23c"><span class="st insufficient">preuves minces</span>un seul article du corpus traite cette question</div>':''}<h2>Revue vérifiée</h2><p class="sub">Écrite uniquement à partir d'affirmations vérifiées dans chaque article · cliquez sur une citation pour lire les phrases sources.</p>${body||'<p class="empty">Aucune phrase soutenue.</p>'}
-  ${r.gaps?`<div class="s" style="border-left:3px solid #e3b23c"><span class="st insufficient">non couvert par les preuves</span>${esc(r.gaps)}</div>`:''}`}
+  ${r.gaps?`<div class="s" style="border-left:3px solid #e3b23c"><span class="st insufficient">couverture des preuves</span>${esc(r.gaps)}</div>`:''}`}
   ${cards?'<h2 style="margin-top:18px">Ce que dit chaque article</h2>'+cards:''}
   ${rem.length?'<h2 style="margin-top:18px">Retirées par la vérification</h2>'+rem.map((s,i)=>sent(s,'r'+i)).join(''):''}`;
  const cell=x=>x?hl(x.text.length>200?x.text.slice(0,x.text.lastIndexOf(' ',200))+' …':x.text):'<span class="na">non rapporté</span>';

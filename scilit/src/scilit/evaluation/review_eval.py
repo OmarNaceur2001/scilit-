@@ -23,12 +23,15 @@ Commands
                   claims     share of reading-card claims the verifier supports
                   synthesis  points planned, sentences, share supported, kept per review, share of the
                              kept sentences' word trigrams copied from their sources (a design that only
-                             copies would score high on support while synthesising nothing)
+                             copies would score high on support while synthesising nothing), share of the
+                             verified claims used, for the top 4 and the last 4 retrieved papers
                   cost       abstentions, latency of reading and of synthesis
   compare A B   the same questions under two configurations: mean difference in share supported and
                 in kept sentences, paired bootstrap (10,000 resamples over questions)
   verify-set    the verifier test set for HUMAN labelling (labels/verify/), see build_verify_set
-  verify-score  every verifier against the human labels, see verify_score
+  verify-export / verify-import   the same items for ChatGPT (3 paste-sized parts) / its answers ->
+                sheet_chatgpt.csv, kept apart from the human sheets and always reported as LLM labels
+  verify-score  every verifier against the labels (--labels human | chatgpt), see verify_score
 
 Usage
   python -m scilit.evaluation.review_eval run --tag test --set test
@@ -142,6 +145,21 @@ def supported_share(r: dict) -> float:
     return r["counts"]["supported"] / len(r["sentences"]) if r["sentences"] else 0.0
 
 
+def usage(runs: list[dict], top: int | None) -> float:
+    """Share of the verified claims cited by at least one synthesis sentence (kept or not), for the
+    papers ranked < 4 (top=True), >= 4 (top=False) or all (None): shows whether the synthesis uses
+    the evidence of every retrieved paper or mostly of the first ones."""
+    used = total = 0
+    for r in runs:
+        rank = {c["paper_id"]: i for i, c in enumerate(r["cards"])}
+        cited = {c for s in r["sentences"] for c in s["cites"]}
+        for cid, c in r["claims"].items():
+            if top is None or (rank.get(c["paper_id"], 0) < 4) == top:
+                total += 1
+                used += cid in cited
+    return used / total if total else float("nan")
+
+
 def report() -> None:
     qrels = {}
     if QRELS.exists():
@@ -173,6 +191,7 @@ def report() -> None:
             "supported": sum(s["status"] == "supported" for s in sents) / max(len(sents), 1),
             "kept_per_q": st.mean(r["counts"]["supported"] for r in runs),
             "copied_kept": st.mean(copied(s, c) for s, c in kept) if kept else float("nan"),
+            "claims_used": usage(runs, None), "used_top4": usage(runs, True), "used_last4": usage(runs, False),
             "abstained": sum(r["abstained"] for r in runs), "thin_evidence": sum(bool(r.get("thin_evidence")) for r in runs),
             "reading_s": st.mean(r["latency_s"].get("search", 0) + r["latency_s"].get("reading", 0) for r in runs),
             "synthesis_s": st.mean(r["latency_s"].get("synthesis", 0) for r in runs)})
@@ -186,7 +205,7 @@ def report() -> None:
           f"Relevance labels: {QRELS} (ChatGPT, declared LLM labels; test set only).", "",
           "## Reading and claims", ""] + table(ident[:2] + ["relevant_per_q", "reader_pairs", "reader_agree", "reader_kappa",
                                                            "reader_bin_agree", "reader_bin_kappa", "claims", "claims_supported"]) + \
-         ["", "## Synthesis", ""] + table(ident + ["points_per_q", "sentences_per_q", "supported", "kept_per_q", "copied_kept",
+         ["", "## Synthesis", ""] + table(ident + ["points_per_q", "sentences_per_q", "supported", "kept_per_q", "copied_kept", "claims_used", "used_top4", "used_last4",
                                                   "abstained", "thin_evidence", "reading_s", "synthesis_s"])
     Path("reports/review_eval.md").write_text("\n".join(md) + "\n", encoding="utf-8")
     print("\n".join(md))
@@ -334,6 +353,43 @@ def read_sheet(path: Path) -> dict[int, str]:
     return out
 
 
+GPT_PROMPT = """You are checking sentences from a literature review against their sources.
+For each item, read the SOURCES, then the SENTENCE, and answer with one letter:
+  S = supported: every fact in the sentence (numbers, conditions, methods, what it applies to) is
+      stated or directly implied by the sources
+  P = partly supported: the main point is there, but something is added, changed or generalised
+  N = not supported: the sources do not say it
+  C = contradicted: the sources say the opposite
+Judge each item on its own. Reply with ONLY one line per item:  <item number>: <letter>
+"""
+GPT_PARTS = 3
+
+
+def export_chatgpt() -> None:
+    """The same items as the human sheets, in GPT_PARTS files small enough to paste into ChatGPT.
+    Its labels are LLM labels: kept in their own sheet, always reported as such."""
+    items = [json.loads(l) for l in (VDIR / "items.jsonl").open(encoding="utf-8")]
+    size = -(-len(items) // GPT_PARTS)
+    for k in range(GPT_PARTS):
+        part = items[k * size:(k + 1) * size]
+        body = "\n\n".join(f"ITEM {it['item']}\nSOURCES: {' || '.join(it['sources'])}\nSENTENCE: {it['text']}" for it in part)
+        (VDIR / f"chatgpt_part{k + 1}.txt").write_text(GPT_PROMPT + "\n" + body + "\n", encoding="utf-8")
+    print(f"{len(items)} items -> {VDIR}/chatgpt_part1..{GPT_PARTS}.txt. Paste each into ChatGPT, put ALL its "
+          f"answers in {VDIR}/chatgpt_answers.txt, then run: verify-import")
+
+
+def import_chatgpt() -> None:
+    n = sum(1 for _ in (VDIR / "items.jsonl").open(encoding="utf-8"))
+    found = dict(re.findall(r"(?im)^\W*(?:item\s*)?(\d+)\**\s*[:=.)\-–]\s*\**([SPNC])\b", (VDIR / "chatgpt_answers.txt").read_text(encoding="utf-8")))
+    with (VDIR / "sheet_chatgpt.csv").open("w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["item", "label"])
+        w.writerows([int(i), found[i].upper()] for i in sorted(found, key=int) if 1 <= int(i) <= n)
+    missing = [i for i in range(1, n + 1) if str(i) not in found]
+    print(f"{n - len(missing)} of {n} ChatGPT labels imported -> {VDIR}/sheet_chatgpt.csv" +
+          (f"; missing items: {missing}" if missing else ""))
+
+
 def rates(gold: list[int], pred: list[int]) -> dict:
     """1 = supported. False acceptance = a not-supported sentence the verifier lets into the review."""
     tp = sum(g and p for g, p in zip(gold, pred)); fp = sum(not g and p for g, p in zip(gold, pred))
@@ -344,16 +400,18 @@ def rates(gold: list[int], pred: list[int]) -> dict:
             "false_accepted": fp, "false_rejected": fn}
 
 
-def verify_score(which: list[str]) -> None:
+def verify_score(which: list[str], labels: str = "human") -> None:
     """Gold = the label both labellers gave (items where they disagree are left out and counted);
     binary: S = supported, P / N / C = not. DeBERTa's entailment threshold is chosen on the
-    "calibrate" half (best balanced accuracy) and every number is reported on the "test" half."""
+    "calibrate" half (best balanced accuracy) and every number is reported on the "test" half.
+    labels="human": sheets A and B; labels="chatgpt": ChatGPT's sheet, reported as LLM labels."""
     items = {it["item"]: it for it in map(json.loads, (VDIR / "items.jsonl").open(encoding="utf-8"))}
-    sheets = {w: read_sheet(VDIR / f"sheet_{w}.csv") for w in "AB"}
+    names = ["A", "B"] if labels == "human" else ["chatgpt"]
+    sheets = {w: read_sheet(VDIR / f"sheet_{w}.csv") for w in names}
     sheets = {w: s for w, s in sheets.items() if s}
     if not sheets:
-        raise SystemExit(f"No labels yet in {VDIR}/sheet_A.csv or sheet_B.csv.")
-    res: dict = {"labellers": sorted(sheets)}
+        raise SystemExit(f"No labels yet in {VDIR}: " + ", ".join(f"sheet_{w}.csv" for w in names))
+    res: dict = {"labels": "human" if labels == "human" else "ChatGPT (LLM labels)", "labellers": sorted(sheets)}
     if len(sheets) == 2:
         common = sorted(set(sheets["A"]) & set(sheets["B"]))
         res["kappa_4_labels"] = round(kappa([ "SPNC".index(sheets["A"][i]) for i in common],
@@ -367,11 +425,17 @@ def verify_score(which: list[str]) -> None:
         if len(labs) == 1 and all(i in s for s in sheets.values()):
             gold[i] = int(labs.pop() == "S")
     res["gold_items"] = len(gold)
+    gpt = read_sheet(VDIR / "sheet_chatgpt.csv") if labels == "human" else {}
+    if gpt:
+        common = sorted(set(gold) & set(gpt))
+        res["chatgpt_vs_human_kappa_binary"] = round(kappa([gold[i] for i in common], [int(gpt[i] == "S") for i in common]), 3)
     split = {s: [i for i in sorted(gold) if items[i]["split"] == s] for s in ("calibrate", "test")}
-    md = ["# Verifier evaluation (Part 11)", "",
+    md = [f"# Verifier evaluation (Part 11): {res['labels']} labels", "",
           f"{len(items)} items (real pairs from the runs + hard cases with a known way to be wrong), labelled by "
-          f"{len(sheets)} person(s); gold = agreed labels ({len(gold)} items). Reported on the test half "
+          f"{'ChatGPT' if labels == 'chatgpt' else f'{len(sheets)} person(s)'}; gold = agreed labels ({len(gold)} items). Reported on the test half "
           f"({len(split['test'])} items)."]
+    if "chatgpt_vs_human_kappa_binary" in res:
+        md += [f"ChatGPT vs human gold: kappa {res['chatgpt_vs_human_kappa_binary']} (supported / not)."]
     if "kappa_binary" in res:
         md += [f"Agreement between labellers: kappa {res['kappa_binary']} (supported / not), {res['kappa_4_labels']} (4 labels); "
                f"{res['disagreements']} disagreements left out."]
@@ -406,8 +470,8 @@ def verify_score(which: list[str]) -> None:
            "| type | " + " | ".join(which) + " |", "|" + " --- |" * (len(which) + 1)]
     md += [f"| {k} | " + " | ".join(f"{v[n][0]}/{v[n][1]}" for n in which) + " |" for k, v in sorted(per_type.items())]
     Path("reports").mkdir(exist_ok=True)
-    Path("reports/verifier_eval.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
-    Path("reports/verifier_eval.md").write_text("\n".join(md) + "\n", encoding="utf-8")
+    Path(f"reports/verifier_eval_{labels}.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
+    Path(f"reports/verifier_eval_{labels}.md").write_text("\n".join(md) + "\n", encoding="utf-8")
     print("\n".join(md))
 
 
@@ -415,7 +479,8 @@ def main() -> None:
     from scilit.generation.llm import MODEL
     from scilit.generation.review import SYNTHESES
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["run", "replay", "report", "compare", "verify-set", "verify-score"])
+    ap.add_argument("cmd", choices=["run", "replay", "report", "compare", "verify-set", "verify-export", "verify-import",
+                                    "verify-score"])
     ap.add_argument("--tag")
     ap.add_argument("--set", choices=list(SETS), default="test")
     ap.add_argument("--source", help="run whose saved cards are reused (replay, verify-set)")
@@ -425,6 +490,7 @@ def main() -> None:
     ap.add_argument("--verifier", choices=["deberta", "minicheck"], default=V.VERIFIER)
     ap.add_argument("--synthesis", choices=SYNTHESES, default="plan")
     ap.add_argument("--which", nargs="+", default=["deberta", "minicheck"], help="verifiers to score")
+    ap.add_argument("--labels", choices=["human", "chatgpt"], default="human", help="labels verify-score uses")
     ap.add_argument("--force", action="store_true", help="rebuild the verifier set (labels will no longer match)")
     a = ap.parse_args()
     if a.cmd == "run":
@@ -437,8 +503,12 @@ def main() -> None:
         compare(*a.tags)
     elif a.cmd == "verify-set":
         build_verify_set(a.source, a.model, a.force)
+    elif a.cmd == "verify-export":
+        export_chatgpt()
+    elif a.cmd == "verify-import":
+        import_chatgpt()
     else:
-        verify_score(a.which)
+        verify_score(a.which, a.labels)
 
 
 if __name__ == "__main__":

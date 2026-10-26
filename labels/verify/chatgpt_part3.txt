@@ -1,0 +1,156 @@
+You are checking sentences from a literature review against their sources.
+For each item, read the SOURCES, then the SENTENCE, and answer with one letter:
+  S = supported: every fact in the sentence (numbers, conditions, methods, what it applies to) is
+      stated or directly implied by the sources
+  P = partly supported: the main point is there, but something is added, changed or generalised
+  N = not supported: the sources do not say it
+  C = contradicted: the sources say the opposite
+Judge each item on its own. Reply with ONLY one line per item:  <item number>: <letter>
+
+ITEM 77
+SOURCES: Joint score (JS) is calculated by multiplying both DS and ES element-wise, and the results are presented in Table 4. The best model Claude3-Opus achieves a JS of 0.49 which suggests that the task of detecting factual inconsistency and explaining the same is still a challenging task for most modern-day LLMs, making them incapable to reason out-of-the-box.
+SENTENCE: The task of detecting factual inconsistency and explaining the same is no longer a challenging task for most modern-day LLMs, making them capable to reason out-of-the-box.
+
+ITEM 78
+SOURCES: Table 1 presents the evaluation results of using different word embeddings for different classifiers. For the pre-trained word embeddings, GloVe outperformed Word2vec for DAN, Bi-LSTM and Tree-LSTM, whereas Word2vec yielded better performance for CNN. || After the proposed refinement model was applied, both the pre-trained Word2vec and GloVe were improved. The Re(Word2vec) and Re(GloVe) respectively improved Word2vec and GloVe by 1.7% and 1.5% averaged over all classifiers for binary classification, and both 1.6% for fine-grained classification.
+SENTENCE: GloVe outperformed Word2vec for some classifiers before refinement, and both improved by 1.7% and 1.5% respectively for binary classification after refinement.
+
+ITEM 79
+SOURCES: It helps LLMs achieve performance comparable to current contrastive learning methods. By scaling model size, we find scaling to more than tens of billion parameters harms the performance on semantic textual similarity (STS) tasks. || By scaling model size, we find scaling to more than tens of billion parameters harms the performance on semantic textual similarity (STS) tasks. However, the largest model outperforms other counterparts and achieves the new state-of-the-art result on transfer tasks.
+SENTENCE: Scaling LLMs beyond tens of billions harms semantic textual similarity but improves transfer tasks, achieving new SOTA.
+
+ITEM 80
+SOURCES: However, the human evaluation setup for evaluating factual consistency has not been standardized. To determine the factors that affect the reliability of the human evaluation, we crowdsource evaluations for factual consistency across state-of-the-art models on two news summarization datasets using the rating-based Likert Scale and ranking-based Best-Worst Scaling. || To determine the factors that affect the reliability of the human evaluation, we crowdsource evaluations for factual consistency across state-of-the-art models on two news summarization datasets using the rating-based Likert Scale and ranking-based Best-Worst Scaling. Our analysis reveals that the ranking-based Best- Worst Scaling offers a more reliable measure of summary quality across datasets and that the reliability of Likert ratings highly depends on the target dataset and the evaluation design.
+SENTENCE: The authors find that Best-Worst Scaling offers a more reliable measure of summary quality.
+
+ITEM 81
+SOURCES: Table 2 compares different passage retrieval systems on five QA datasets, using the top-k accuracy (k ∈{20, 100}). With the exception of SQuAD, DPR performs consistently better than BM25 on all datasets. || With the exception of SQuAD, DPR performs consistently better than BM25 on all datasets. The gap is especially large when k is small (e.g., 78.4% vs. 59.1% for top-20 accuracy on Natural Questions). || We find that all dense models that have been pre-trained out-peform the BM25 baseline by a large margin. || We again find that all dense models out-perform the BM25 baseline. || However, in this paper, we demonstrate current dense models are not yet the holy grail of retrieval. We first construct EntityQuestions, a set of simple, entityrich questions based on facts from Wikidata (e.g., “Where was Arve Furset born?”), and observe that dense retrievers drastically underperform sparse methods. || We report the macro-averaged accuracy over all relations of EntityQuestions. Results We evaluate DPR and BM25 on the EntityQuestions dataset and report results in Table 1 (see full results and examples in Appendix A). || Results We evaluate DPR and BM25 on the EntityQuestions dataset and report results in Table 1 (see full results and examples in Appendix A). DPR trained on NQ significantly underperforms BM25 on almost all sets of questions.
+SENTENCE: DPR outperforms BM25 for smaller top-k accuracies, all dense models significantly outperform BM25, but dense retrievers underperform on simple entity-rich questions.
+
+ITEM 82
+SOURCES: We propose a novel contrastive framework for sentence embedding, termed DebCSE, which can eliminate the impact of these biases by an inverse propensity weighted sampling method to select high-quality positive and negative pairs according to both the surface and semantic similarity between sentences. Extensive experiments on semantic textual similarity (STS) benchmarks reveal that DebCSE significantly outperforms the latest state-of-the-art models with an average Spearman’s correlation coefficient of 80.33% on BERTbase.
+SENTENCE: DebCSE significantly outperforms the latest state-of-the-art models with an average Spearman’s correlation coefficient of 80.33% on BERTbase.
+
+ITEM 83
+SOURCES: We benchmark eight pretrained language models using BenchCLAMP. We find that fine-tuning encoder-decoder pretrained language models can come close to or surpass the performance of state-of-the-art methods on all parsing datasets.
+SENTENCE: The authors find that fine-tuning encoder-decoder pretrained language models can come close to or surpass the performance of state-of-the-art methods on all parsing datasets, although they do not specify which particular parsing datasets were used.
+
+ITEM 84
+SOURCES: For example, learned attention weights are frequently uncorrelated with gradient-based measures of feature importance, and one can identify very different attention distributions that nonetheless yield equivalent predictions. Our findings show that standard attention modules do not provide meaningful explanations and should not be treated as though they do. || We report that neither property is consistently observed by a BiLSTM with a standard attention mechanism in the context of text classification, question answering (QA), and Natural Language Inference (NLI) tasks.
+SENTENCE: The authors find that standard attention mechanisms do not provide meaningful explanations for model predictions.
+
+ITEM 85
+SOURCES: Our results demonstrate that finetuning LLMs to be retrieval-robust enables them to ignore irrelevant context while improving their overall accuracy (§4). When using a strong retriever at test time, our finetuned models outperform both models that were finetuned without retrieval, as well as untrained models prompted using in-context learning.
+SENTENCE: The authors demonstrate that their finetuned models outperform both models that were finetuned without indexing and untrained models prompted using few-shot learning.
+
+ITEM 86
+SOURCES: Then we pass the input sentence and its modified counterpart to the pre-trained Transformer encoder, respectively, to get the positive pair. Additionally, we draw inspiration from the computer vision community and introduce momentum contrast to enlarge the number of negative pairs without additional calculations. || And thus, a potential optimization direction is to leverage more negative pairs, encouraging the model towards more refined learning. || Momentum contrast allows us to reuse the encoded embeddings from the immediate preceding mini-batches to expand the negative pairs by maintaining a queue.
+SENTENCE: Momentum contrast hurts to shrink the number of negative pairs without additional calculations.
+
+ITEM 87
+SOURCES: The primary objective is to ensure that the model’s response maintains high levels of accuracy and consistency. Effective utilization of the retrieved context plays a critical role in achieving this goal.
+SENTENCE: This paper claims that effective utilization of the retrieved evidence is critical for maintaining accuracy and consistency in the model’s response.
+
+ITEM 88
+SOURCES: We propose a cluster-masked masking method that significantly improves local feature capture and optimizes image scanning efficiency. Additionally, our universal encoder-decoder pretraining approach integrates multiple tasks, including image autoregression, depth estimation, and image segmentation, thereby enhancing the model’s adaptability and robustness across diverse visual tasks.
+SENTENCE: The MAL framework integrates multiple tasks, including image autoregression, depth estimation, and image segmentation.
+
+ITEM 89
+SOURCES: This paper is a study of fine-tuning of BERT contextual representations, with focus on commonly observed instabilities in few-sample scenarios. We identify several factors that cause this instability: the common use of a non-standard optimization method with biased gradient estimation; the limited applicability of significant parts of the BERT network for down-stream tasks; and the prevalent practice of using a pre-determined, and small number of training iterations.
+SENTENCE: The authors identify several factors causing instability in fine-tuning BERT, including biased gradient estimation, limited applicability of BERT layers, and insufficient training iterations.
+
+ITEM 90
+SOURCES: Even for models with a low hallucination rate, specifically GPT-3.5- Turbo and GPT-4, employing the finetuned hallucination detector for sampling can still further reduce the rate of hallucinations. The two strategies yielded a reduction in hallucination rates of 42.9% and 51.0%, respectively.
+SENTENCE: The two strategies yielded a reduction in hallucination rates of 42.9% and 51.0% respectively, even for models with a low hallucination rate, and these improvements were maintained across various types of input prompts.
+
+ITEM 91
+SOURCES: Chain-of-Thought (CoT) prompting improves trust and model performance on complex reasoning tasks by generating interpretable reasoning chains, but still suffers from factuality concerns in knowledge-intensive tasks. In this paper, we propose the Verify-and-Edit framework for CoT prompting, which seeks to increase prediction factuality by post-editing reasoning chains according to external knowledge. || We find that the model is able to benefit from more factual reasoning chains, thus generating more accurate predictions. || We find that the model is able to benefit from more factual reasoning chains, thus generating more accurate predictions. For example, for open-domain QA, our model demonstrates 3.8x accuracy improvement compared to similar retrieval-augmented models on AdvHotpot. || We find that the model is able to benefit from more factual reasoning chains, thus generating more accurate predictions. For example, for open-domain QA, our model demonstrates 3.8x accuracy improvement compared to similar retrieval-augmented models on AdvHotpot. || For example, for open-domain QA, our model demonstrates 3.8x accuracy improvement compared to similar retrieval-augmented models on AdvHotpot. On 2WikiMultihop, Verify-and-Edit reaches 33.6% accuracy with open-domain search, while CoT Self-Consistency stands at 27.7%.
+SENTENCE: The Verify-and-Edit framework improves LLM accuracy in complex reasoning tasks, showing a 3.8x boost in open-domain QA and higher accuracy on 2WikiMultihop.
+
+ITEM 92
+SOURCES: OWQ prioritizes a small subset of structured weights sensitive to quantization, storing them in high-precision, while applying highly tuned quantization to the remaining dense weights. This sensitivity-aware mixed-precision scheme reduces the quantization error notably, and extensive experiments demonstrate that 3.1-bit models using OWQ perform comparably to 4bit models optimized by OPTQ.
+SENTENCE: This paper demonstrates that 4.0-bit models using OWQ perform comparably to 4-bit models optimized by OPTQ.
+
+ITEM 93
+SOURCES: We propose DiffCSE, an unsupervised contrastive learning framework for learning sentence embeddings. DiffCSE learns sentence embeddings that are sensitive to the difference between the original sentence and an edited sentence, where the edited sentence is obtained by stochastically masking out the original sentence and then sampling from a masked language model.
+SENTENCE: The authors propose DiffCSE to learn sentence embeddings sensitive to the difference between original and edited sentences.
+
+ITEM 94
+SOURCES: Table 2 shows that including TrueTeacher data in the training set, substantially improves the strong-performing T5-11B w.
+SENTENCE: Including TrueTeacher data in the training set substantially improves model performance on the TRUE benchmark.
+
+ITEM 95
+SOURCES: Hence, we direct our attention to these Hard languages. For those languages, we show that the script they are written in can be a critical element in the transfer abilities of pre-trained multilingual language models. || For those languages, we show that the script they are written in can be a critical element in the transfer abilities of pre-trained multilingual language models. Transliterating them leads to large gains in performance outperforming non-contextual strong baselines. || By focusing on those, we find that this challenge is mostly due to the script. || Hence, we direct our attention to these Hard languages. For those languages, we show that the script they are written in can be a critical element in the transfer abilities of pre-trained multilingual language models. || For those languages, we show that the script they are written in can be a critical element in the transfer abilities of pre-trained multilingual language models. Transliterating them leads to large gains in performance outperforming non-contextual strong baselines. || By focusing on those, we find that this challenge is mostly due to the script.
+SENTENCE: The script used for a language significantly impacts multilingual model transfer learning, especially for hard languages, where transliteration can improve performance.
+
+ITEM 96
+SOURCES: Fine-tuning a pretrained BERT model is the state of the art method for extractive/abstractive text summarization, in this paper we showcase how this fine-tuning method can be applied to the Arabic language to both construct the first documented model for abstractive Arabic text summarization and show its performance in Arabic extractive summarization. || Table 2 presents our results on KALIMAT data-set. We conclude that pre-trained M-BERT leads to huge improvements in performance for relatively small data-sets in both extractive and abstractive summarization.
+SENTENCE: Using multilingual BERT instead of monolingual BERT can significantly improve performance for Arabic summarization tasks.
+
+ITEM 97
+SOURCES: For the English datasets, the differences are minor. Size Effects More training data results in higher prediction accuracy even when the eye tracking data comes from various languages and was recorded in different reading studies by different devices (ALL-LANGS, fine-tuning on the data of all four languages together). || Size Effects More training data results in higher prediction accuracy even when the eye tracking data comes from various languages and was recorded in different reading studies by different devices (ALL-LANGS, fine-tuning on the data of all four languages together). However, merely adding more data from the same language (ALL (en), fine-tuning on the English data from Dundee, GECO and ZuCo together) does not result in higher performance. || Figure 7 shows the results for cross-language evaluation to probe the language transfer capabilities of the multilingual models. We test models fine-tuned on language A on the test set of language B. It can be seen that BERT-MULTI generalizes better across languages than the XLM models.
+SENTENCE: The performance of multilingual models depends on the training data and the model architecture.
+
+ITEM 98
+SOURCES: G1 - Understand how self-attention informs model behavior. || In this work we evaluate the contribution made by individual attention heads in the encoder to the overall performance of the model and analyze the roles played by them. We find that the most important and confident heads play consistent and often linguistically-interpretable roles.
+SENTENCE: The authors find that the most important and confident heads of self-attention play consistent and linguistically-interpretable roles.
+
+ITEM 99
+SOURCES: In this section, we discuss the results of arithmetic reasoning, commonsense and symbolic reasoning. Arithmetic Reasoning: Active-Prompt achieves the best performance compared with all baseline models, indicating the superiority of our method. || Arithmetic Reasoning: Active-Prompt achieves the best performance compared with all baseline models, indicating the superiority of our method. Compared with the competitive baseline, self-consistency, Active-Prompt (D) outperforms it by an average of 2.1% with code-davinci-002. || Compared with the competitive baseline, self-consistency, Active-Prompt (D) outperforms it by an average of 2.1% with code-davinci-002. A larger improvement is observed with text-davinci-002, where Active- Prompt (D) improves over self-consistency by 7.2%.
+SENTENCE: Active-Prompt outperforms baseline methods in arithmetic reasoning tasks, achieving superior performance.
+
+ITEM 100
+SOURCES: It is naturally interpretable because an attention weight has a clear meaning: how much a particular word will be weighted when computing the next representation for the current word. || BERT’s attention heads exhibit patterns such as attending to delimiter tokens, specific positional offsets, or broadly attending over the whole sentence, with heads in the same layer often exhibiting similar behaviors. We further show that certain attention heads correspond well to linguistic notions of syntax and coreference. || We further show that certain attention heads correspond well to linguistic notions of syntax and coreference. For example, we find heads that attend to the direct objects of verbs, determiners of nouns, objects of prepositions, and coreferent mentions with remarkably high accuracy. || If attention is not identifiable, explanations based on attention may be unwarranted.
+SENTENCE: Attention weights represent word importance, capture syntax accurately, and warrant explanations if identifiable.
+
+ITEM 101
+SOURCES: We report state-of-the-art results on the ACL-ARC dataset, and also show significant improvement on the SciCite dataset over all baseline models except one. As suitably large labelled datasets for citation intent classification can be quite hard to find, in a first, we propose the conversion of this task to the few-shot and zero-shot settings. || Table 4 showed the results of classifying positive and negative citations using different word embeddings. The macro-F score 0.85 and the weighted-F score 0.86 proved that word2vec is effective on classifying positive and negative citations. || With respect to classifying negative citations, this method was not as good as sentence structure features but it outperformed the baseline.
+SENTENCE: The authors convert the task to few-shot and zero-shot settings, find word2vec effective for positive and negative citation classification, and outperform the baseline in negative citation classification.
+
+ITEM 102
+SOURCES: In addition, the second experiment further attempts to produce a final fully-attributed output free of hallucination. Generally, in over 80% of cases, the LLM is able to verify its generated texts when provided with relevant supporting material.
+SENTENCE: In over 80% of cases, the LLM is able to verify its generated texts when provided with relevant supporting material, although the sources do not mention the specific types of supporting material used.
+
+ITEM 103
+SOURCES: LoRA introduces a minimal set of trainable parameters through low-rank decomposition, typically reducing the number of task-specific parameters by several orders of magnitude. This is especially beneficial in resource-constrained and multi-task scenarios requiring multiple model adaptations.
+SENTENCE: This is especially beneficial in resource-constrained and multi-task scenarios requiring multiple model adaptations.
+
+ITEM 104
+SOURCES: We test models fine-tuned on language A on the test set of language B. It can be seen that BERT-MULTI generalizes better across languages than the XLM models. This might be due to the fact that the multilingual BERT model is trained on one large vocabulary of many languages but the XLM models are trained with a cross-lingual objective and language information.
+SENTENCE: The multilingual BERT model is trained on a large vocabulary of many languages, while XLM models are trained with a cross-lingual objective.
+
+ITEM 105
+SOURCES: A model’s factual consistency is then measured according to its accuracy, i.e. the proportion of documents where it assigns a higher score to the factually consistent summary. To validate the usefulness of FIB, we evaluate 23 large language models ranging from 1B to 176B parameters from six different model families including BLOOM and OPT.
+SENTENCE: The authors validate the usefulness of FIB by evaluating 23 large language models ranging from 1B to 176B parameters.
+
+ITEM 106
+SOURCES: Our analyses show that LMs struggle at recognizing entities associated with Arab culture which appear at very high frequencies in Arabic pre-training data (§4.1), where such entities exhibit strong word polysemy in Arabic (§4.2). We also find that high lexical overlap of Arab entities with pre-training data of languages that use Arabic script (e.g., Farsi, Urdu, etc.) causes drops in performance (§4.3).
+SENTENCE: High lexical overlap of Chinese entities with pre-training data from other languages that use the Chinese script leads to performance drops in LMs.
+
+ITEM 107
+SOURCES: In this paper, Automatic dialect classification system for Arabic dialects identification is proposed. Four Arabic dialects: Egyptian, Iraq, Levantine and Kuwait are considered in this study. || This paper is introduced an independent system Arabic Dialect classification based on acoustic model . The speakers from four different countries: Egyptian , Iraq ,Levantine and Kuwait .
+SENTENCE: Four Arabic dialects (Egyptian, Iraq, Levantine, and Kuwait) are considered in the study.
+
+ITEM 108
+SOURCES: We observe in table 4 that the different word embeddings yield a large range of accuracy on this task. The word embeddings ranking obtained in the previous evaluation task is not preserved.
+SENTENCE: The authors observe that the word embeddings ranking is preserved across different tasks does not hold.
+
+ITEM 109
+SOURCES: Finally, our implementation of CheckList includes multiple abstractions that help users generate large numbers of test cases easily, such as templates, lexicons, general-purpose perturbations, visualizations, and context-aware suggestions.
+SENTENCE: Using CheckList, practitioners can generate a large number of test cases easily, although the sources do not mention the specific use of machine learning algorithms in the process.
+
+ITEM 110
+SOURCES: Second, we observe the top layers of the pre-trained BERT provide a detrimental initialization for fine-tuning and delay learning. Simply re-initializing these layers not only speeds up learning but also leads to better model performance. || We carefully evaluate a number of design decisions when pretraining BERT models. We find that performance can be substantially improved by training the model longer, with bigger batches over more data; removing the next sentence prediction objective; training on longer sequences; and dynamically changing the masking pattern applied to the training data. || Our improved pretraining procedure, which we call RoBERTa, achieves state-of-the-art results on GLUE, RACE and SQuAD, without multi-task finetuning for GLUE or additional data for SQuAD. These results illustrate the importance of these previously overlooked design decisions and suggest that BERT’s pretraining objective remains competitive with recently proposed alternatives. || We additionally found training to be very sensitive to the Adam epsilon term, and in some cases we obtained better performance or improved stability after tuning it. Similarly, we found setting β2 = 0.98 to improve stability when training with large batch sizes.
+SENTENCE: The authors find that re-initializing BERT top layers speeds up learning and improves performance, and that longer training, larger batches, removing next sentence prediction, longer sequences, and dynamic masking improve performance, with β2 set to 0.98 for stability.
+
+ITEM 111
+SOURCES: We propose a novel evaluation approach, eRAG, where each document in the retrieval list is individually utilized by the large language model within the RAG system. The output generated for each document is then evaluated based on the downstream task ground truth labels. || The output generated for each document is then evaluated based on the downstream task ground truth labels. In this manner, the downstream performance for each document serves as its relevance label. || We employ various downstream task metrics to obtain document-level annotations and aggregate them using set-based or ranking metrics. Extensive experiments on a wide range of datasets demonstrate that eRAG achieves a higher correlation with downstream RAG performance compared to baseline methods, with improvements in Kendall’s τcorrelation ranging from 0.168 to 0.494. || Extensive experiments on a wide range of datasets demonstrate that eRAG achieves a higher correlation with downstream RAG performance compared to baseline methods, with improvements in Kendall’s τcorrelation ranging from 0.168 to 0.494. Additionally, eRAG offers significant computational advantages, improving runtime and consuming up to 50 times less GPU memory than end-to-end evaluation. || Furthermore, we investigate the impact of different retrieval augmentation methods, the quantity of retrieved documents, and the LLM size on correlation. Finally, we demonstrate that our approach offers significant computational advantages, consuming up to 50 times less memory compared to end-to-end evaluation. || Our results demonstrate that our proposed approach achieves the highest correlation with the downstream performance of the RAG system in comparison with the baselines. Specifically, we observe an absolute improvement in Kendall’s tau correlation ranging between 0.168 and 0.494 across the evaluated datasets. || Finally, we demonstrate that our approach offers significant computational advantages, consuming up to 50 times less memory compared to end-to-end evaluation. To facilitate research in this domain, we make eRAG’s implementation publicly available at: https://github.com/alirezasalemi7/eRAG.
+SENTENCE: eRAG evaluates retrieved documents based on downstream task performance, offering higher correlation with RAG system performance, significant computational advantages, and effectiveness with correlation ranging from 0.168 to 0.494.
+
+ITEM 112
+SOURCES: We propose structural scaffolds, a multitask model to incorporate structural information of scientific papers into citations for effective classification of citation intents. Our model achieves a new state-ofthe-art on an existing ACL anthology dataset (ACL-ARC) with a 13.3% absolute increase in F1 score, without relying on external linguistic resources or hand-engineered features as done in existing methods. || We argue that with the proper choice of the pretrained language model, the prompt template, and the prompt verbalizer, we can not only get results that are better than or comparable to those obtained with the state-of-the-art methods but also do it with much less exterior information about the scientific document. We report state-of-the-art results on the ACL-ARC dataset, and also show significant improvement on the SciCite dataset over all baseline models except one. || We also obtain improvements when introducing the tags for prediction of the number of citations for 88k scientific publications that we compiled from the Allen AI S2ORC dataset. For our HAN-system with structure-tags we reach 28.5% explained variance, an improvement of 1.8% over our reimplementation of the BiLSTM-based model as well as 1.0% improvement over plain HANs. || A strong and significant correlation between accept/reject labels and number of citations was demonstrated, signaling the usefulness of the latter as a measure of scholarly document quality. With more training data, as available on the citation-score prediction task, HAN with structure-tags outperforms the strong and recently proposed scholarly document quality prediction models that we compared to in this study.
+SENTENCE: Their model achieves state-of-the-art results on ACL-ARC with a 13.3% F1 score increase, outperforms on SciCite, and surpasses state-of-the-art for accept/reject and citation-score prediction.
+
+ITEM 113
+SOURCES: In this work, we propose CheckList, a new evaluation methodology and accompanying tool1 for comprehensive behavioral testing of NLP models. CheckList guides users in what to test, by providing a list of linguistic capabilities, which are applicable to most tasks.
+SENTENCE: CheckList provides a list of linguistic capabilities to guide users in what to test, but the sources do not specify the exact number of capabilities included in the list.
