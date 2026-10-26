@@ -1,49 +1,126 @@
 # SciLit
 
-SciLit is a Python research-literature pipeline for collecting papers, indexing text, retrieving passages, extracting claims/citations, generating a template-based literature-review draft, and optionally auditing citation support with NLI.
+**A literature-review assistant for NLP research that only writes what it can prove.**
 
-## Configure environment
+Ask a research question. SciLit finds the relevant papers in a corpus of 1,109 NLP papers, reads each one, writes a short review, and checks every sentence against the original text. A sentence that the sources do not support is removed, and every remaining sentence links back to the exact sentences in the PDF.
 
-Python 3.10 or newer is required.
+Everything runs locally and uses open models only.
 
-1. Create and activate a virtual environment.
-2. Install the package and its dependencies from the repository root:
+## How it works
 
-   ```bash
-   pip install -e ".[dev]"
-   ```
+```
+question
+   │
+   ├─ 1. Retrieve     BM25 + BGE-M3 dense search, fused with RRF, reranked by bge-reranker-v2-m3
+   │                  → the 8 most relevant papers
+   ├─ 2. Read         per paper: its own sentences only (no related work, no citing sentences),
+   │                  the abstract + the 3 passages most relevant to the question
+   │                  → Qwen2.5-7B writes a reading card: is the paper relevant, and up to 4 claims,
+   │                    each pointing to its source sentences
+   ├─ 3. Verify       every claim is checked against its source sentences
+   │                  (numbers, attribution, NLI with DeBERTa-v3)
+   ├─ 4. Plan         Qwen groups the verified claims into points (claim IDs only, no text yet)
+   ├─ 5. Write        one sentence per point, written from that point's claims only
+   └─ 6. Verify       every sentence is checked against the original source sentences;
+                      unsupported sentences are removed and shown with the reason
+```
 
-3. Copy `.env.example` to `.env` and edit the values. The app loads `.env` automatically at startup; already-exported environment variables take precedence over `.env`.
+Design choices that matter:
 
-   ```bash
-   # Windows PowerShell
-   Copy-Item .env.example .env
+- **Citations are fixed before any text is written.** The model picks claim IDs from a closed list (constrained JSON decoding), then writes from those claims only. It cannot cite a source that does not exist or the wrong one.
+- **The model never sees author names.** Who said what comes from the citations, so a result cannot be attributed to the wrong paper.
+- **The verifier reads the original PDF sentences, never the model's own text.**
 
-   # macOS / Linux
-   cp .env.example .env
-   ```
+The corpus pipeline: OpenAlex + arXiv metadata, deduplication, a PDF quality gate, a layout-aware PyMuPDF parser (sections, sentences, references, in-text citations) and structure-aware chunking. A fine-tuned SciBERT labels sentence roles (objective, method, result…) to fill a comparison table across papers.
 
-4. Start the API so `API_HOST`, `API_PORT`, and `APP_ENV` are applied:
+## Results
 
-   ```bash
-   python -m scilit.api.main
-   ```
+| What | Data | Result |
+|---|---|---|
+| Retrieval, nDCG@10 | 30 test questions | hybrid + rerank **0.827**, BM25 0.823 (difference not significant, p = 0.42) |
+| Sentence roles, macro-F1 | CSAbstruct, deduplicated splits | SciBERT **0.749 ± 0.005**, TF-IDF 0.691, rules 0.357 (p ≤ 0.001) |
+| Citation function, macro-F1 | SciCite | SciBERT **0.855 ± 0.017**, published 0.855 (reproduced) |
+| Review sentences supported | 30 test + 12 held-out questions | **95% / 93%**, vs 53% / 67% for single-call generation on the same reading cards (p < 0.001) |
 
-   Interactive API docs: `http://127.0.0.1:8000/docs` (adjust the host/port to your `.env`).
+How these numbers were measured:
 
-## Environment variables
+- Classifiers: 3 seeds, model chosen on dev, reported on test. Sentences that appear in both train and test in the official CSAbstruct splits (12.7% of test) were removed.
+- Review: both designs are run on identical saved reading cards, so the difference comes from the synthesis step only. The held-out questions were written after the design was fixed and never inspected before the final run.
+- "Supported" is the verifier's judgement. Measuring the verifier's own error rate on a human-labelled set (real pairs + hard cases: swapped numbers, removed qualifiers, reversed findings…) is in progress.
+- Retrieval relevance labels were produced by an LLM and are declared as such.
 
-- `APP_NAME`: FastAPI title.
-- `APP_ENV`: set to `development` to enable Uvicorn reload when starting with `python -m scilit.api.main`; other values disable reload.
-- `API_HOST`, `API_PORT`: API bind address and port.
-- `DEFAULT_TOP_K`: default retrieval depth for API, CLI retrieval, and review generation (valid range: 1–50).
-- `RETRIEVAL_MODE`: `rrf`, `bm25`, or `dense`.
-- `DATA_DIR`: corpus/index/review data directory. Relative paths are resolved from the repository root.
-- `SCILIT_ROOT` and the legacy `SCILIT_DATA_DIR` remain supported for existing setups.
-- `OPENAI_API_KEY`, `GROQ_API_KEY`: loaded for future/provider integrations. The current Bronze review generator is deterministic/template-based and does not call either LLM provider.
+## Quick start
 
-**Security:** `.env` is ignored by Git. Do not commit API keys; commit `.env.example` with blank values instead.
+Requirements: Python 3.10+, [Ollama](https://ollama.com), a GPU with 8 GB is enough.
 
-## Existing data
+```bash
+pip install -e .
+ollama pull qwen2.5:7b
+```
 
-By default, SciLit expects its corpus and indexes under `data/raw/` and `data/parsed/`. Configure `DATA_DIR` if the data is stored elsewhere.
+Build the corpus and indexes (one time):
+
+```bash
+python -m scilit.corpus.collect          # OpenAlex search, seeds, citation snowball
+python -m scilit.corpus.normalize        # metadata correction, deduplication
+python -m scilit.corpus.fetch_pdfs
+python -m scilit.corpus.validate         # PDF quality gate
+python -m scilit.corpus.parse_pdf
+python -m scilit.corpus.make_splits      # frozen dev / test split
+python -m scilit.corpus.chunk
+python -m scilit.retrieval.build_index --bm25
+python -m scilit.retrieval.build_index --dense BAAI/bge-m3
+python -m scilit.extraction.roles        # train SciBERT sentence roles
+python -m scilit.extraction.extract      # reading grid for the comparison table
+```
+
+Ask a question:
+
+```bash
+python -m scilit.generation.review "How does retrieval-augmented generation reduce hallucination?"
+```
+
+Or use the web interface:
+
+```bash
+uvicorn scilit.api.main:app --port 8000      # then open http://127.0.0.1:8000
+```
+
+`collect` uses the OpenAlex API: set `OPENALEX_API_KEY` in your environment (see `.env.example`). Never commit keys.
+
+## Evaluation
+
+```bash
+python -m scilit.evaluation.retrieval_eval                          # retrieval metrics
+python -m scilit.evaluation.review_eval run --set test              # full pipeline, saves reading cards
+python -m scilit.evaluation.review_eval replay --source test --tag test_single --synthesis single
+python -m scilit.evaluation.review_eval compare --tags test test_single
+python -m scilit.evaluation.review_eval report
+python -m scilit.evaluation.review_eval verify-set --source test    # verifier test set for human labelling
+python -m scilit.evaluation.review_eval verify-score --which deberta
+```
+
+The slow step (search + reading) runs once; every comparison replays the saved reading cards, so two configurations differ in exactly one thing.
+
+## Project layout
+
+```
+scilit/src/scilit/
+  corpus/       collection, metadata, PDF validation and parsing, chunking
+  retrieval/    BM25 and dense indexes, hybrid search and reranking
+  extraction/   SciBERT sentence roles, citation function, reading grid
+  generation/   reader, synthesis, verifier, comparison table, LLM client
+  evaluation/   retrieval and end-to-end evaluation, verifier test set
+  api/          FastAPI server and web interface
+configs/        themes and seed papers
+labels/         test and held-out questions, relevance labels, verifier labels
+reports/        evaluation results
+```
+
+## Limitations
+
+- The corpus has 1,109 papers: a question outside it gets a thin answer or none. SciLit says so instead of inventing.
+- The reader sees about 30 sentences per paper; findings only in tables or appendices can be missed.
+- The verifier can accept a sentence that links a correct number to the wrong condition. Its error rate is being measured.
+- The LLM runs at temperature 0, but GPU inference is not bitwise reproducible: averages are stable, individual reviews can vary slightly.
+- English only for now: questions in French retrieve English papers, but reviews are written in English.
