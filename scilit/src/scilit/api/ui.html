@@ -27,6 +27,9 @@ h1{font:700 3.1rem/1.08 var(--sans);letter-spacing:-.025em;margin:10px 0 16px}h1
 .actions{display:flex;gap:12px;margin-top:16px;flex-wrap:wrap}
 .langs{margin-top:20px;font-size:.85rem;color:var(--ink2);display:flex;gap:8px;align-items:center}.langs span{background:#fff;border:1px solid var(--line);border-radius:8px;padding:2px 9px;font-weight:600;color:var(--ink)}
 .art{width:100%;height:auto}
+.mode{display:flex;gap:8px;align-items:center;margin-top:14px;font-size:.88rem;color:var(--ink2);cursor:pointer}.mode input{width:16px;height:16px;accent-color:var(--green)}
+.trace{background:#fff;border:1px dashed var(--line);border-radius:12px;padding:14px 16px;margin:14px 0;font-size:.88rem}.trace h3{font-size:.95rem;margin-bottom:6px}
+.trace code{background:var(--mint);border-radius:6px;padding:1px 6px;margin:2px;display:inline-block}.trace table{width:100%;border-collapse:collapse;margin-top:6px}.trace td{padding:3px 6px;border-top:1px solid var(--line)}
 .wave{background:var(--mint);position:relative;padding:60px 0;margin-top:30px}
 .wave:before,.wave:after{content:"";position:absolute;left:0;right:0;height:40px;background:var(--mint);border-radius:50% 50% 0 0/100% 100% 0 0}.wave:before{top:-20px}.wave:after{bottom:-20px;border-radius:0 0 50% 50%/0 0 100% 100%}
 .wave.sky,.wave.sky:before,.wave.sky:after{background:var(--sky)}
@@ -92,6 +95,7 @@ footer a,footer p{color:#c9d2e3;font-size:.86rem;text-decoration:none;display:bl
 <p class="lead">SciLit retrouve les articles pertinents, compare leurs méthodes et leurs résultats, puis rédige une synthèse dont chaque phrase est confrontée au passage qu'elle cite. Aucune citation inventée.</p>
 <div class="ask"><input id="q" value="LoRA vs full fine-tuning in low-resource settings"><button class="btn primary" onclick="go('search')">Rechercher</button></div>
 <div class="actions"><button class="btn primary" id="gen" onclick="go('review')">Générer une revue vérifiée →</button><button class="btn ghost" onclick="doBib()">Exporter BibTeX ⤓</button></div>
+<label class="mode"><input type="checkbox" id="bronze"> Mode Bronze : composants classiques uniquement (BM25, règles, gabarits), sans modèle neuronal</label>
 <div class="langs">Questions en <span>EN</span><span>FR</span><span>AR</span> · modèles ouverts, exécutés en local</div>
 </div><div><svg viewBox="0 0 520 420" class="art" aria-hidden="true">
 <path d="M70 210c0-110 90-180 200-175 120 5 210 70 200 180-9 105-95 175-215 170C135 380 70 320 70 210z" fill="#dff1e6"/>
@@ -174,8 +178,15 @@ async function doSearch(){show('search');$('search').innerHTML=wait('Recherche d
  const r=await (await fetch('/search?q='+encodeURIComponent(q()))).json();ids=r.results.map(x=>x.paper_id);
  $('search').innerHTML=`<h2>${r.results.length} articles</h2><p class="sub">BM25 + BGE-M3 → RRF → cross-encoder · ${r.latency_s} s</p>`+r.results.map(x=>
  `<div class="result"><div class="rank">${String(x.rank).padStart(2,'0')}</div><div><h3>${esc(x.title)}</h3><div class="meta"><span class="chip">${esc((x.section||'').replace('_',' '))}</span></div><div class="passage">${hl(x.text.slice(0,460))}…</div></div></div>`).join('')}
-async function doReview(){const b=$('gen');b.disabled=true;show('review');$('review').innerHTML=wait('Lecture de chaque article, puis synthèse et vérification de chaque phrase… (2 à 3 minutes)');
- try{const r=await (await fetch('/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q()})})).json();
+async function doReview(){const b=$('gen');b.disabled=true;show('review');const bronze=$('bronze').checked;
+ $('review').innerHTML=wait(bronze?'Mode Bronze : BM25, extraits par règles, revue par gabarit… (quelques secondes)':'Lecture de chaque article, puis synthèse et vérification de chaque phrase… (2 à 3 minutes)');
+ try{const r=await (await fetch('/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q(),mode:bronze?'bronze':'full'})})).json();
+ const L=r.latency_s,tr=r.trace;
+ const trace=tr?`<div class="trace"><h3>Chemin complet (mode Bronze)</h3><b>1. Requête normalisée (tokens BM25) :</b> ${tr.tokens.map(t=>'<code>'+esc(t)+'</code>').join('')||'<i>aucun token</i>'}
+  <br><b>Couverture de la question :</b> ${tr.scope} (seuil ${tr.scope_threshold}, choisi sur dev) ${tr.scope<tr.scope_threshold?'→ <b>hors périmètre</b>, SciLit s\'abstient':'→ dans le périmètre'}
+  <br><b>2. Articles retrouvés (BM25) :</b>${tr.papers.length?'<table>'+tr.papers.map(p=>`<tr><td>${p.rank}</td><td>${esc(p.title)}</td><td>${esc(p.section)}</td><td>score ${p.bm25}</td></tr>`).join('')+'</table>':' <i>aucun article ne contient ces mots : hors périmètre</i>'}
+  <b>3. Phrases candidates lues par article :</b> ${Object.values(tr.evidence).join(' · ')||'0'}
+  <br><b>4. Latence :</b> recherche ${L.search} s · lecture ${L.reading} s · revue + tableau ${L.synthesis} s</div>`:'';
  ids=r.table.map(x=>x.paper_id);const C=r.claims,c=r.counts,n=r.sentences.length,cc=r.claim_counts;
  const nclaims=Object.values(cc).reduce((x,y)=>x+y,0),relevant=r.cards.filter(x=>x.relevant).length;
  const src=(cid,key)=>{const x=C[cid];if(!x)return'';return `<div class="ev" id="${key}"><b>${esc(x.label)} et al. ${x.year}</b> · ${esc(x.title)}<br><i>${esc(x.text)}</i><br>${x.quotes.map(t=>'« '+hl(t)+' »').join('<br>')}</div>`};
@@ -189,7 +200,7 @@ async function doReview(){const b=$('gen');b.disabled=true;show('review');$('rev
   x.claims.filter(y=>y.status==='supported').map(y=>`<div style="margin-top:6px">${hl(y.text)} ${cite(y.id,'c'+k+y.id)}${src(y.id,'c'+k+y.id)}</div>`).join('')+'</div>').join('');
  $('review').innerHTML=`<div class="kpis"><div class="kpi hl"><b>${c.supported}/${n}</b><span>phrases de synthèse soutenues</span></div>
   <div class="kpi"><b>${relevant}/${r.cards.length}</b><span>articles lus jugés pertinents</span></div><div class="kpi"><b>${cc.supported}/${nclaims}</b><span>affirmations vérifiées dans les articles</span></div>
-  <div class="kpi"><b>${(r.latency_s.search+r.latency_s.reading+r.latency_s.synthesis).toFixed(0)} s</b><span>latence totale</span></div></div>
+  <div class="kpi"><b>${(r.latency_s.search+r.latency_s.reading+r.latency_s.synthesis).toFixed(1)} s</b><span>latence totale</span></div></div>${trace}
   ${r.abstained?`<div class="s removed insufficient"><span class="st insufficient">corpus insuffisant</span>${esc(r.gaps)}</div>`:`${r.thin_evidence?'<div class="s" style="border-left:3px solid #e3b23c"><span class="st insufficient">preuves minces</span>un seul article du corpus traite cette question</div>':''}<h2>Revue vérifiée</h2><p class="sub">Écrite uniquement à partir d'affirmations vérifiées dans chaque article · cliquez sur une citation pour lire les phrases sources.</p>${body||'<p class="empty">Aucune phrase soutenue.</p>'}
   ${r.gaps?`<div class="s" style="border-left:3px solid #e3b23c"><span class="st insufficient">couverture des preuves</span>${esc(r.gaps)}</div>`:''}`}
   ${cards?'<h2 style="margin-top:18px">Ce que dit chaque article</h2>'+cards:''}

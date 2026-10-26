@@ -4,7 +4,8 @@ Part 13: FastAPI app over the pipeline (the same code that produced the evaluati
 
   GET  /              web page (style of the original SciLit UI)
   GET  /search?q=     hybrid search -> papers + best passage
-  POST /review        {query, generator: llm|template} -> answer + verification + table
+  POST /review        {query, mode: full|bronze} -> answer + verification + table
+                      bronze = classical components only (BM25, rules, templates), with every step traced
   GET  /bibtex?ids=   BibTeX for paper IDs (comma-separated)
   GET  /docs          automatic API documentation
 
@@ -24,6 +25,8 @@ from scilit.corpus.arxiv_meta import surname
 from scilit.generation import review as R
 from scilit.generation.table import articles
 from scilit.retrieval.search import Searcher
+from scilit.extraction import extract as _rules_table      # noqa: F401  loaded at startup: the first Bronze
+from scilit.extraction import roles as _rules               # noqa: F401  request should not pay the import time
 
 app = FastAPI(title="SciLit", description="Verified literature-review assistant")
 searcher = Searcher()
@@ -32,6 +35,7 @@ searcher = Searcher()
 class ReviewRequest(BaseModel):
     query: str
     generator: str = "llm"
+    mode: str = "full"
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -49,7 +53,7 @@ def search(q: str, k: int = 10):
 @app.post("/review")
 def review(req: ReviewRequest):
     """Same function as the command line: evidence passages -> plan -> sentences -> verification."""
-    return R.run_review(req.query, searcher, req.generator)
+    return R.run_review(req.query, searcher, req.generator, bronze=req.mode == "bronze")
 
 
 @app.get("/bibtex", response_class=PlainTextResponse)

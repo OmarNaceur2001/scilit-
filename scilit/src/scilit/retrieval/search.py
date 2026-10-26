@@ -79,10 +79,44 @@ class Searcher:
         return ce
 
     # --- the four stages ---
+    @cached_property
+    def bm25_pos(self) -> dict:
+        return {cid: i for i, cid in enumerate(self.bm25["ids"])}
+
+    def bm25_scores(self, query: str):
+        """BM25 score of every chunk for the query (kept for the last query: the Bronze reader ranks
+        each paper's own passages with them, without recomputing)."""
+        cache = self.__dict__.setdefault("_bm25_cache", {})
+        if query not in cache:
+            cache.clear()
+            cache[query] = self.bm25["bm25"].get_scores(tokenize(query))
+        return cache[query]
+
+    def bm25_score(self, query: str, cid: str) -> float:
+        return float(self.bm25_scores(query)[self.bm25_pos[cid]])
+
     def bm25_top(self, query: str, n: int = 100) -> list[str]:
-        scores = self.bm25["bm25"].get_scores(tokenize(query))
+        scores = self.bm25_scores(query)
         best = sorted(range(len(scores)), key=lambda i: -scores[i])[:n]
         return [self.bm25["ids"][i] for i in best if scores[i] > 0]
+
+    def coverage(self, query: str, cid: str) -> float:
+        """Share of the query's information found in a passage: query words weighted by their BM25
+        IDF (rare words count more; a word absent from the corpus gets the highest IDF). Used by the
+        Bronze scope rule: a question whose best passage covers too little of it is out of scope."""
+        q = set(tokenize(query))
+        if not q:
+            return 0.0
+        idf = self.bm25["bm25"].idf
+        top = max(idf.values())
+        w = {t: idf.get(t, top) for t in q}
+        c = self.chunks[cid]
+        words = set(tokenize(c["header"] + " " + c["text"]))
+        return sum(w[t] for t in q & words) / sum(w.values())
+
+    def bm25_rank(self, query: str, ids: list[str]) -> list[str]:
+        """Bronze alternative to rerank(): the same passages ordered by BM25 score."""
+        return sorted(ids, key=lambda c: -self.bm25_score(query, c))
 
     def dense_top(self, query: str, n: int = 100) -> list[str]:
         model, index, ids = self.dense

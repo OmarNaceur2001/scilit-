@@ -21,6 +21,9 @@ Checks, first failure wins:
                    "minicheck" Bespoke-MiniCheck-7B (Ollama, 4-bit), trained to decide whether a
                                sentence is supported by a grounding document (Tang et al., 2024,
                                LLM-AggreFact): "Yes" -> supported, "No" -> insufficient. 32K window.
+                   "quote"     Bronze (no model): supported only if the sentence, once its "X et
+                               al. report that" is removed, appears word for word in a source sentence.
+                               It is what the template baseline produces; anything else is rejected.
                  Default: MiniCheck. On the verifier test set (real pairs + hard cases, Part 11) it
                  accepts 8% of unsupported sentences against 33% for DeBERTa, rejects 16% of
                  supported ones against 44%, balanced accuracy 0.88 vs 0.62. DeBERTa stays available
@@ -127,9 +130,18 @@ def minicheck(sources: list[str], hypothesis: str) -> bool:
     return answer.strip().lower().startswith("yes")
 
 
+def quoted(sources: list[str], hypothesis: str) -> bool:
+    flat = lambda t: re.sub(r"\s+", " ", fold(t)).strip(" .")
+    h = flat(hypothesis)
+    return bool(h) and any(h in flat(s) for s in sources)
+
+
 def judge(sources: list[str], hypothesis: str, verifier: str | None = None) -> tuple[str, dict]:
     """Do the sources support the sentence? -> (supported | contradicted | insufficient, scores)."""
     verifier = verifier or VERIFIER
+    if verifier == "quote":
+        ok = quoted(sources, hypothesis)
+        return ("supported" if ok else "insufficient"), {"verifier": "quote", "quoted": ok}
     if verifier == "minicheck":
         ok = minicheck(sources, hypothesis)
         return ("supported" if ok else "insufficient"), {"verifier": "minicheck", "supported": ok}

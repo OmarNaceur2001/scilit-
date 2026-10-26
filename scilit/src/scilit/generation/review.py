@@ -250,53 +250,79 @@ def synthesise_single(query: str, claims: dict, cards: list[dict], model: str) -
     return [s for s in sents if s["text"]], out.get("gaps", "").strip()
 
 
+def lower_first(text: str) -> str:
+    """'We propose' -> 'we propose', but 'LoRA', 'BERT', 'GPT-3' keep their case."""
+    first = text.split(" ", 1)[0]
+    return text if any(ch.isupper() for ch in first[1:]) or any(ch.isdigit() for ch in first) else text[:1].lower() + text[1:]
+
+
 def template_synthesis(claims: dict) -> tuple[list[dict], str]:
-    return [{"text": f"{c['label']} et al. ({c['year']}) report that {c['text'][0].lower() + c['text'][1:]}",
+    return [{"text": f"{c['label']} et al. ({c['year']}) report that {lower_first(c['text'])}",
              "cites": [cid], "part": "Extracts"} for cid, c in claims.items()], ""
 
 
-def check_sentence(s: dict, claims: dict, known: set[str]) -> dict:
+def check_sentence(s: dict, claims: dict, known: set[str], verifier: str | None = None) -> dict:
     cited = [claims[c] for c in s["cites"] if c in claims]
     ok = cited and len(cited) == len(s["cites"])
     sources = [t for c in cited for t in c["source_text"]] if ok else None
     if len(s["text"].split()) > MAX_WORDS * 1.5:
         return {**s, "status": "insufficient", "checks": {"too_long": len(s["text"].split())}}
-    status, checks = V.check(s["text"], sources, {c["author"] for c in cited}, known)
+    status, checks = V.check(s["text"], sources, {c["author"] for c in cited}, known, verifier)
     return {**s, "status": status, "checks": checks}
 
 
 SYNTHESES = ["plan", "single", "template"]
+SCOPE_FILE = Path("configs/bronze.json")
 
 
-def read(query: str, searcher, generator: str = "llm", model: str = MODEL) -> tuple[list[dict], list[dict], dict]:
-    """Steps 1-2 -> (papers, cards, latency). Each card keeps its evidence and the draft."""
+def scope_threshold() -> float:
+    """Bronze scope rule threshold, chosen on the dev set by `bronze_eval tune-scope` (never on test).
+    Not tuned yet -> 0: no question is declared out of scope."""
+    try:
+        return float(json.loads(SCOPE_FILE.read_text(encoding="utf-8"))["scope_threshold"])
+    except (OSError, KeyError, ValueError):
+        return 0.0
+
+
+def read(query: str, searcher, generator: str = "llm", model: str = MODEL,
+         bronze: bool = False) -> tuple[list[dict], list[dict], dict]:
+    """Steps 1-2 -> (papers, cards, latency). Each card keeps its evidence and the draft.
+    bronze=True: BM25 search, BM25 ranking of each paper's passages, template reading, quote
+    verifier: classical components only, no neural model loaded."""
     t = [time.time()]
-    papers = searcher.search(query, k=K_PAPERS)                     # one passage per paper = paper ranking
+    papers = searcher.search(query, k=K_PAPERS, method="bm25" if bronze else "hybrid_rerank")
+    scope = None
+    if bronze:                    # out of scope: even the best passage covers too little of the question
+        scope = max((searcher.coverage(query, p["chunk_id"]) for p in papers), default=0.0)
+        if scope < scope_threshold():
+            papers = []
     docs = documents()
     t.append(time.time())
     metas = [meta(p["paper_id"]) for p in papers]
-    sents = [evidence(query, docs.get(m["paper_id"]), searcher) for m in metas]          # reranker: sequential
+    sents = [evidence(query, docs.get(m["paper_id"]), searcher, "bm25" if bronze else "rerank") for m in metas]
     with ThreadPoolExecutor(READ_WORKERS) as pool:                                       # LLM drafts: concurrent
         drafts = list(pool.map(lambda i: draft_card(query, metas[i], sents[i], generator, model), range(len(metas))))
-    cards = [{**verify_card(m, e, d), "evidence": e, "draft": d} for m, e, d in zip(metas, sents, drafts)]
+    verifier = "quote" if bronze else None
+    cards = [{**verify_card(m, e, d, verifier), "evidence": e, "draft": d} for m, e, d in zip(metas, sents, drafts)]
     t.append(time.time())
-    return papers, cards, {"search": round(t[1] - t[0], 1), "reading": round(t[2] - t[1], 1)}
+    return papers, cards, {"search": round(t[1] - t[0], 1), "reading": round(t[2] - t[1], 1)}, scope
 
 
-def reverify(card: dict) -> dict:
+def reverify(card: dict, verifier: str | None = None) -> dict:
     """The same evidence and draft, verified again with the current verifier (no LLM call)."""
     m = {k: card[k] for k in ("paper_id", "title", "year", "first_author")}
     ev = [tuple(x) for x in card["evidence"]]
-    return {**verify_card(m, ev, card["draft"]), "evidence": card["evidence"], "draft": card["draft"]}
+    return {**verify_card(m, ev, card["draft"], verifier), "evidence": card["evidence"], "draft": card["draft"]}
 
 
-def write_review(query: str, table: list[dict], cards: list[dict], synthesis: str = "plan", model: str = MODEL) -> dict:
+def write_review(query: str, table: list[dict], cards: list[dict], synthesis: str = "plan", model: str = MODEL,
+                 verifier: str | None = None) -> dict:
     """Steps 3-7 from reading cards: abstain, synthesise (one of SYNTHESES), verify every sentence."""
     t = time.time()
     claims = claim_index(cards)
     known = {surname(c["first_author"]) for c in cards} - {""}
     covered = {c["paper_id"] for c in claims.values()}
-    result = {"query": query, "synthesis": synthesis, "model": model, "verifier": V.VERIFIER, "cards": cards,
+    result = {"query": query, "synthesis": synthesis, "model": model, "verifier": verifier or V.VERIFIER, "cards": cards,
               "claims": claims, "claim_counts": V.count([c for card in cards for c in card["claims"]]),
               "table": table, "abstained": not covered, "thin_evidence": len(covered) == 1}
     points: list[dict] = []
@@ -312,18 +338,32 @@ def write_review(query: str, table: list[dict], cards: list[dict], synthesis: st
     gaps, cov = coverage(cards, claims, off)
     if result["abstained"]:
         gaps = f"The corpus does not cover this question. {gaps}"
-    sentences = [check_sentence(s, claims, known) for s in draft]
+    sentences = [check_sentence(s, claims, known, verifier) for s in draft]
     result.update(plan=points, off_topic=off, coverage=cov, sentences=sentences, gaps=gaps, counts=V.count(sentences),
                   latency_s={"synthesis": round(time.time() - t, 1)})
     return result
 
 
-def run_review(query: str, searcher, generator: str = "llm", model: str = MODEL, synthesis: str = "plan") -> dict:
-    """The whole review, used by the command line AND the API."""
-    papers, cards, lat = read(query, searcher, generator, model)
-    r = write_review(query, build_table(papers), cards, "template" if generator == "template" else synthesis, model)
-    r["generator"] = generator
-    r["latency_s"] = {**lat, **r["latency_s"]}
+def run_review(query: str, searcher, generator: str = "llm", model: str = MODEL, synthesis: str = "plan",
+               bronze: bool = False) -> dict:
+    """The whole review, used by the command line AND the API.
+    bronze=True: the classical pipeline (BM25, template reading and synthesis, quote verifier, rule-based
+    table); its result also carries "trace", every intermediate step, for the demo's debug view."""
+    if bronze:
+        generator, synthesis = "template", "template"
+    papers, cards, lat, scope = read(query, searcher, generator, model, bronze)
+    t = time.time()
+    table = build_table(papers, bronze)
+    r = write_review(query, table, cards, "template" if generator == "template" else synthesis, model,
+                     "quote" if bronze else None)
+    r["generator"], r["mode"] = generator, "bronze" if bronze else "full"
+    r["latency_s"] = {**lat, "synthesis": round(r["latency_s"]["synthesis"] + time.time() - t, 1)}
+    if bronze:
+        from scilit.retrieval.build_index import tokenize
+        r["trace"] = {"tokens": tokenize(query), "scope": round(scope, 3), "scope_threshold": scope_threshold(),
+                      "papers": [{"rank": p["rank"], "title": p["title"], "section": p["section"],
+                                  "bm25": round(searcher.bm25_score(query, p["chunk_id"]), 2)} for p in papers],
+                      "evidence": {c["paper_id"]: len(c["evidence"]) for c in cards}}
     return r
 
 
@@ -357,10 +397,11 @@ def main() -> None:
     ap.add_argument("--generator", choices=["llm", "template"], default="llm")
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--synthesis", choices=SYNTHESES, default="plan")
+    ap.add_argument("--bronze", action="store_true", help="classical pipeline only (BM25 + templates, no model)")
     ap.add_argument("--verifier", choices=["deberta", "minicheck"], default=V.VERIFIER)
     args = ap.parse_args()
     V.VERIFIER = args.verifier
-    r = run_review(args.query, Searcher(), args.generator, args.model, args.synthesis)
+    r = run_review(args.query, Searcher(), args.generator, args.model, args.synthesis, args.bronze)
     slug = re.sub(r"[^a-z0-9]+", "-", V.fold(args.query)).strip("-")[:60] + f"_{r['synthesis']}"
     out = Path("data/reviews"); out.mkdir(parents=True, exist_ok=True)
     (out / f"{slug}.json").write_text(json.dumps(r, ensure_ascii=False, indent=1), encoding="utf-8")

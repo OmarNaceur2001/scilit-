@@ -2,6 +2,8 @@
 SciLit - generation/table.py
 Part 9: comparison table. Same columns for every retrieved paper (the module's reading grid);
 each cell is the source sentence itself + its ID, or "not reported" (never guessed).
+  full mode    the grid stored by extract.py (sentence roles from the fine-tuned SciBERT)
+  Bronze mode  the grid built on the fly with the cue rules of roles.py (no model)
 
 Usage: python -m scilit.generation.table "LoRA vs full fine-tuning in low-resource settings"
 """
@@ -25,14 +27,22 @@ def articles() -> dict:
     return {a["id"]: a for a in map(json.loads, Path("data/raw/articles.jsonl").open(encoding="utf-8"))}
 
 
-def build_table(results: list[dict]) -> list[dict]:
+def build_table(results: list[dict], bronze: bool = False) -> list[dict]:
     """One row per paper, in ranking order (results may hold several passages of one paper)."""
     rows, seen = [], set()
     for r in results:
         if r["paper_id"] in seen:
             continue
         seen.add(r["paper_id"])
-        rec, art = records().get(r["paper_id"]), articles()[r["paper_id"]]
+        art = articles()[r["paper_id"]]
+        if bronze:
+            from scilit.extraction.extract import grid_for, rules_classify
+            from scilit.generation.reader import documents
+            doc = documents().get(r["paper_id"])
+            grid, numeric = grid_for(doc, rules_classify) if doc else ({}, [])
+            rec = {"grid": grid, "numeric": numeric}
+        else:
+            rec = records().get(r["paper_id"])
         row = {"paper_id": r["paper_id"], "title": art["title"], "year": art.get("arxiv_year") or art["year"],
                "first_author": (art["authors"] or ["?"])[0]}
         for col in COLUMNS:

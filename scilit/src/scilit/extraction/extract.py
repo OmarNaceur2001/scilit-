@@ -69,6 +69,44 @@ def numeric_triples(sid: str, text: str) -> list[dict]:
     return out
 
 
+def grid_for(doc: dict, classify) -> tuple[dict, list]:
+    """The reading grid of one paper. classify(texts) -> [(role, confidence or None)]: SciBERT for the
+    stored records (main), or the cue rules of roles.py for the Bronze table (rules_classify)."""
+    sents = [(s, sec["type"]) for sec in doc["sections"] for s in sec["sentences"]]
+    to_classify = [(s, t) for s, t in sents if t in ROLE_SECTIONS]
+    roles = classify([s["text"] for s, _ in to_classify]) if to_classify else []
+    item = lambda s, conf: {"id": s["id"], "text": s["text"], "conf": conf, "hedging": hedging(s["text"])}
+    grid, used = {}, set()
+
+    def pick(cands):                                 # cands: (rank_key, sentence, conf); no sentence twice
+        out = []
+        for _, s, c in sorted(cands, key=lambda x: x[0]):
+            if s["id"] not in used and complete(s["text"]):
+                used.add(s["id"]); out.append(item(s, c))
+            if len(out) == PER_FIELD:
+                break
+        return out
+    labelled = [(s, t, r, c) for (s, t), (r, c) in zip(to_classify, roles)]
+    for field in ("question", "results", "method"):  # order = priority when a sentence fits two fields
+        role, secs = FIELD_SOURCES[field]
+        grid[field] = pick([(rank(s, t, CUES[field], c), s, c) for s, t, r, c in labelled if r == role and t in secs])
+    # data: THIS paper's data (first person or a named dataset), never related work
+    grid["data"] = pick([(rank(s, t, FIRST_PERSON, None), s, None) for s, t in sents
+                         if t in {"abstract", "experiments"} and DATA.search(s["text"])
+                         and (FIRST_PERSON.search(s["text"]) or NAMED.search(s["text"]))])
+    grid["limits"] = pick([(rank(s, t, LIMIT, None), s, None) for s, t in sents
+                           if t == "limitations" or (t in {"conclusion", "discussion"} and LIMIT.search(s["text"]))])
+    numeric = [tr for s, t in to_classify for tr in numeric_triples(s["id"], s["text"])
+               if any(x["id"] == s["id"] for x in grid["results"]) or t == "results"]
+    return grid, numeric[:10]
+
+
+def rules_classify(texts: list[str]) -> list[tuple[str, None]]:
+    """Bronze: sentence roles from the cue rules (roles.py), no model."""
+    from scilit.extraction.roles import rules_predict
+    return [(r, None) for r in rules_predict(texts)]
+
+
 def main() -> None:
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -95,33 +133,9 @@ def main() -> None:
             doc = json.loads(line)
             if not doc["structured"]:
                 continue
-            sents = [(s, sec["type"]) for sec in doc["sections"] for s in sec["sentences"]]
-            to_classify = [(s, t) for s, t in sents if t in ROLE_SECTIONS]
-            roles = classify([s["text"] for s, _ in to_classify]) if to_classify else []
-            item = lambda s, conf: {"id": s["id"], "text": s["text"], "conf": conf, "hedging": hedging(s["text"])}
-            grid, used = {}, set()
-            def pick(cands):                             # cands: (rank_key, sentence, conf); no sentence twice
-                out = []
-                for _, s, c in sorted(cands, key=lambda x: x[0]):
-                    if s["id"] not in used and complete(s["text"]):
-                        used.add(s["id"]); out.append(item(s, c))
-                    if len(out) == PER_FIELD:
-                        break
-                return out
-            labelled = [(s, t, r, c) for (s, t), (r, c) in zip(to_classify, roles)]
-            for field in ("question", "results", "method"):  # order = priority when a sentence fits two fields
-                role, secs = FIELD_SOURCES[field]
-                grid[field] = pick([(rank(s, t, CUES[field], c), s, c) for s, t, r, c in labelled if r == role and t in secs])
-            # data: THIS paper's data (first person or a named dataset), never related work
-            grid["data"] = pick([(rank(s, t, FIRST_PERSON, None), s, None) for s, t in sents
-                                 if t in {"abstract", "experiments"} and DATA.search(s["text"])
-                                 and (FIRST_PERSON.search(s["text"]) or NAMED.search(s["text"]))])
-            grid["limits"] = pick([(rank(s, t, LIMIT, None), s, None) for s, t in sents
-                                   if t == "limitations" or (t in {"conclusion", "discussion"} and LIMIT.search(s["text"]))])
-            numeric = [tr for s, _ in to_classify for tr in numeric_triples(s["id"], s["text"])
-                       if any(x["id"] == s["id"] for x in grid["results"]) or _ == "results"]
+            grid, numeric = grid_for(doc, classify)
             f.write(json.dumps({"paper_id": doc["id"], "title": doc["title"], "grid": grid,
-                                "numeric": numeric[:10]}, ensure_ascii=False) + "\n")
+                                "numeric": numeric}, ensure_ascii=False) + "\n")
             n += 1
             if n % 200 == 0:
                 print(f"  {n} papers", flush=True)

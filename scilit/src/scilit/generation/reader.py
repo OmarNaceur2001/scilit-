@@ -125,7 +125,7 @@ def own_sentences(doc: dict) -> dict[str, tuple[str, str]]:
     return out
 
 
-def evidence(query: str, doc: dict, searcher) -> list[tuple[str, str, str]]:
+def evidence(query: str, doc: dict, searcher, ranker: str = "rerank") -> list[tuple[str, str, str]]:
     """The question-relevant part of a paper's own content, in reading order:
     [(sentence id, text, context)], context = the previous sentence when it is also the paper's own
     content (it resolves "this model", "the fine-tuned model"... for the verifier)."""
@@ -140,7 +140,8 @@ def evidence(query: str, doc: dict, searcher) -> list[tuple[str, str, str]]:
     candidates = [cid for cid in searcher.chunks_by_paper.get(doc["id"], [])
                   if searcher.chunks[cid]["section_type"] in OWN_SECTIONS - {"abstract"}
                   and any(sid in own for sid in searcher.chunks[cid]["sentence_ids"])]
-    for cid in searcher.rerank(query, candidates)[:TOP_PASSAGES] if candidates else []:
+    rank = searcher.bm25_rank if ranker == "bm25" else searcher.rerank         # Bronze: BM25, no model
+    for cid in rank(query, candidates)[:TOP_PASSAGES] if candidates else []:
         picked += [sid for sid in searcher.chunks[cid]["sentence_ids"] if sid in own]
     picked = sorted(dict.fromkeys(picked), key=order.get)[:MAX_SENTENCES]
     return [(sid, own[sid][1], own[previous[sid]][1] if previous.get(sid) in own else "") for sid in picked]
@@ -161,7 +162,7 @@ def draft_card(query: str, meta: dict, sents: list[tuple[str, str, str]], genera
                   card_schema([sid for sid, _, _ in sents]), model)
 
 
-def verify_card(meta: dict, sents: list[tuple[str, str, str]], draft: dict) -> dict:
+def verify_card(meta: dict, sents: list[tuple[str, str, str]], draft: dict, verifier: str | None = None) -> dict:
     """-> card {relation, relevant, claims: [{text, sources, status, checks}], sentences, context}.
     Each claim is checked against its source sentences, each preceded by its context sentence."""
     text, ctx = {sid: t for sid, t, _ in sents}, {sid: c for sid, _, c in sents}
@@ -171,7 +172,7 @@ def verify_card(meta: dict, sents: list[tuple[str, str, str]], draft: dict) -> d
     for c in draft.get("claims", []) if relevant else []:
         sources = [s for s in dict.fromkeys(c.get("sources", [])) if s in text]
         premise = [f"{ctx[s]} {text[s]}".strip() for s in sources]
-        status, checks = V.check(c["text"], premise or None, me, me)
+        status, checks = V.check(c["text"], premise or None, me, me, verifier)
         claims.append({"text": c["text"].strip(), "sources": sources, "status": status, "checks": checks})
     used = {s for c in claims for s in c["sources"]}
     return {**meta, "relation": draft.get("relation", RELATIONS[2]), "relevant": relevant, "claims": claims,

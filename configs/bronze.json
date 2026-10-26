@@ -1,0 +1,6 @@
+{
+ "scope_threshold": 0.557,
+ "chosen_on": "labels\\dev_scope.tsv",
+ "dev_balanced_accuracy": 0.917,
+ "date": "2026-10-26"
+}
